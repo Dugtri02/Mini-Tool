@@ -433,4 +433,4 @@ class Envelope(commands.GroupCog, name="envelope"):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Envelope(bot), guild=discord.Object(id=271776624490446858)) 
-    # the "guild=discord.Object(id=271776624490446858)" is restricting these commands to the guild with ID 271776624490446858    
+    # the "guild=discord.Object(id=271776624490446858)" is restricting these commands to the guild with ID 271776624490446858     
