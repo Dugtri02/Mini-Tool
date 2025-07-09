@@ -207,23 +207,28 @@ class Garbage(commands.Cog):
         except Exception as e:
             print(f"Error checking guild ban status: {e}")
     
-    @commands.Cog.listener()
-    async def on_guild_remove(self, guild):
-        """Clean up guild data when the bot is removed from a guild."""
-        try:
-            # Import the clean_guild_data function from database_utils
-            from utils.database_utils import clean_guild_data
+    
+    """on_guild_remove utilizes the clean_guild_data function from database_utils to clean up guild data when the bot is removed from a guild.
+    but this function is not available to users forking the repo, so it has been commented out for now."""
+    # @commands.Cog.listener()
+    # async def on_guild_remove(self, guild):
+    #     """Clean up guild data when the bot is removed from a guild."""
+    #     try:
+    #         # Import the clean_guild_data function from database_utils
+    #         from utils.database_utils import clean_guild_data
             
-            # Clean up the guild's data
-            result = await clean_guild_data(self.db, guild.id)
+    #         # Clean up the guild's data
+    #         result = await clean_guild_data(self.db, guild.id)
             
-            if result['success']:
-                pass
-            else:
-                print(f"Failed to clean up data for guild {guild.name} ({guild.id}): {result['error']}")
+    #         if result['success']:
+    #             pass
+    #         else:
+    #             print(f"Failed to clean up data for guild {guild.name} ({guild.id}): {result['error']}")
                 
-        except Exception as e:
-            print(f"Error in on_guild_remove for guild {guild.id}: {e}")
+    #     except Exception as e:
+    #         print(f"Error in on_guild_remove for guild {guild.id}: {e}")
+    
+    
 
 async def setup(bot):
     await bot.add_cog(Garbage(bot))
