@@ -1,3 +1,6 @@
+# I made this to auto-forward messages from a channel to a thread because I didn't know webhooks
+# could already do that... well now I know so this whole thing is shelfed lol
+
 import discord; from discord import app_commands; from discord.ext import commands
 import sqlite3; from typing import Optional, List
 
@@ -433,4 +436,4 @@ class Envelope(commands.GroupCog, name="envelope"):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Envelope(bot), guild=discord.Object(id=271776624490446858)) 
-    # the "guild=discord.Object(id=271776624490446858)" is restricting these commands to the guild with ID 271776624490446858     
+    # the "guild=discord.Object(id=271776624490446858)" is restricting these commands to the guild with ID 271776624490446858
