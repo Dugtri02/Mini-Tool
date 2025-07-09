@@ -2051,6 +2051,8 @@ class SpotlightCommands(commands.Cog):
         await self.spotlight.set_guild_max_configs(guild_id_int, amount)
         await interaction.response.send_message(f"✅ Set maximum spotlight configurations to {amount} for guild {guild_id}", ephemeral=True)
 
+        logger.info(f"Set maximum spotlight configurations to {amount} for guild {guild_id}")
+
 async def setup(bot):
     spotlight = Spotlight(bot)
     await bot.add_cog(spotlight)
