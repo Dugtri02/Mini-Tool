@@ -425,7 +425,8 @@ class Spotlight(commands.GroupCog, name="spotlight"):
     @app_commands.describe(
         config="The configuration to update",
         role="The role to blacklist",
-        slot="Which blacklist slot to use (1-4)"
+        slot="Which blacklist slot to use (1-4)",
+        option="Whether to add or remove the role from the blacklist"
     )
     @app_commands.autocomplete(config=config_autocomplete)
     @app_commands.choices(slot=[
@@ -2016,73 +2017,15 @@ class Spotlight(commands.GroupCog, name="spotlight"):
         
         self.db.commit()
 
-
-
-
 class SpotlightCommands(commands.Cog):
     def __init__(self, bot, spotlight_instance):
         self.bot = bot
         self.spotlight = spotlight_instance
         
-    async def config_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        """Autocomplete for spotlight configs"""
-        return await self.spotlight.config_autocomplete(interaction, current)
-        
-    @app_commands.command(name="slr", description="[DIG] Set the last rotation time for a spotlight config (SEO: set_last_rotation)")
-    @app_commands.describe(
-        config_id="The ID of the config to modify",
-        hours_ago="How many hours ago the last rotation should be set to",
-        minutes_ago="Additional minutes to subtract from the rotation time"
-    )
-    @app_commands.allowed_installs(users=True)
-    @app_commands.allowed_contexts(guilds=True)
-    @app_commands.autocomplete(config_id=config_autocomplete)
-    async def set_last_rotation(self, interaction: discord.Interaction, config_id: str, hours_ago: int, minutes_ago: int = 0):
-        """Set the last rotation time for a spotlight config (for testing)"""
-
-        if interaction.user.id != 311456723682590721:
-            await interaction.response.send_message("❌ You are not authorized to use this command.", ephemeral=True)
-            return
-
-        await interaction.response.defer(ephemeral=True)
-        
-        # Verify the config exists
-        cursor = self.spotlight.db.cursor()
-        try:
-            config_id = int(config_id)
-        except ValueError:
-            cursor.close()
-            return await interaction.followup.send(f"❌ No spotlight config found with ID {config_id}", ephemeral=True)
-            
-        cursor.execute('SELECT id FROM spotlight WHERE id = ?', (config_id,))
-        if not cursor.fetchone():
-            await interaction.followup.send(f"❌ No spotlight config found with ID {config_id}", ephemeral=True)
-            return
-            
-        # Calculate the new last_rotation time
-        new_time = datetime.now(timezone.utc) - timedelta(hours=hours_ago, minutes=minutes_ago)
-        new_time_str = new_time.isoformat()
-        
-        # Update the database
-        cursor.execute(
-            'UPDATE spotlight SET last_rotation = ? WHERE id = ?',
-            (new_time_str, config_id)
-        )
-        self.spotlight.db.commit()
-        
-        # Invalidate cache
-        await self.spotlight.cache.delete(interaction.guild_id)
-        
-        await interaction.followup.send(
-            f"✅ Set last rotation time for config {config_id} to {new_time_str} "
-            f"({hours_ago} hours, {minutes_ago} minutes ago)",
-            ephemeral=True
-        )
-        
-        logger.info(f"[ADMIN] User {interaction.user} (ID: {interaction.user.id}) "
-                   f"set last_rotation for config {config_id} to {new_time_str}")
+    # these are user install commands, so they're usable globally but require you install the app as a user install to see them
+    # specifically if you're using your own custom bot these features allow you to modify the amount of spotlight configs a guild can have
     
-    @app_commands.command(name="smc", description="[DIG] Set the maximum number of spotlight configs for a guild")
+    @app_commands.command(name="smc", description="Set the maximum number of spotlight configs for a guild")
     @app_commands.describe(
         guild_id="The ID of the guild to update",
         amount="Maximum number of spotlight configurations (minimum 2)"
@@ -2090,10 +2033,10 @@ class SpotlightCommands(commands.Cog):
     @app_commands.allowed_installs(users=True)
     @app_commands.allowed_contexts(guilds=True)
     async def set_max_configs(self, interaction: discord.Interaction, guild_id: str, amount: int):
-        """Set the maximum number of spotlight configurations allowed for a guild (Owner only)"""
-        if interaction.user.id != 311456723682590721:
+    
+        if interaction.user.id != 311456723682590721: # if you're using your own custom bot with this feature replace the user ID with your own
             await interaction.response.send_message("❌ You are not authorized to use this command.", ephemeral=True)
-            return
+            return # alternatively you can simply delete this if statement on your own custom bot
 
         try:
             guild_id_int = int(guild_id)
