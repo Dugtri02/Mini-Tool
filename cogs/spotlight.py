@@ -2051,6 +2051,8 @@ class SpotlightCommands(commands.Cog):
         await self.spotlight.set_guild_max_configs(guild_id_int, amount)
         await interaction.response.send_message(f"✅ Set maximum spotlight configurations to {amount} for guild {guild_id}", ephemeral=True)
         
+    # these are server install commands, so they're usable globally but require you install the app as a server install to see them
+    # specifically if you're using your own custom bot these features allow you to modify the amount of spotlight configs a guild can have
 
 async def setup(bot):
     spotlight = Spotlight(bot)
