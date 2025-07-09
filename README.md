@@ -1,5 +1,14 @@
 # Mini-Tool🪛 (Beta v0.2)
 
+> **Disclaimer:**  
+> Mini-Tool is currently in **beta** and may be open to abuse or contain bugs. Use with caution and report any issues you encounter.
+
+
+
+🚀: [Click here to add the Official Mini-Tool to your Discord Server](https://discord.com/oauth2/authorize?client_id=1133525308075675690&permissions=532844899568&integration_type=0&scope=bot)
+
+---
+
 ## ✨ Features at a Glance
 
 Focused on microfeatures and safer alternatives to Discord's dangerous permissions, Mini-Tool delivers powerful tools that give users and staff more control—without overreaching permissions or complexity. This can help solve potential moderation issues revolving around nuking or spamming of roles, channels, or messages.
