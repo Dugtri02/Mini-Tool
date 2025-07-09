@@ -48,4 +48,4 @@ Feel free to open issues, suggest features, or submit pull requests.
 Originally developed by 'Dugtri02' with help from AI tools.  
 now being supported with help from the [community](https://discord.gg/Dt8jxXsXwe).
 
-For support, feedback, or to join the community, visit [Molecord](https://discord.gg/Dt8jxXsXwe), our community Discord server. 
+For support, feedback, or to join the community, visit [Molecord](https://discord.gg/Dt8jxXsXwe), our community Discord server.  
