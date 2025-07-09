@@ -1,7 +1,5 @@
-import discord, sqlite3, io
-from discord.ext import commands
-from discord import app_commands
-from typing import Optional
+import discord; from discord import app_commands; from discord.ext import commands
+import sqlite3, io; from typing import Optional
 
 class Garbage(commands.Cog):
     def __init__(self, bot):

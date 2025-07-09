@@ -1,14 +1,7 @@
-import discord
-import sqlite3
-import time
-import asyncio
-import re
-from datetime import datetime
-from discord.ext import commands, tasks
-from discord import app_commands
+import discord; from discord import app_commands; from discord.ext import commands, tasks
+import time, asyncio, re, sqlite3, logging; from datetime import datetime
 from typing import List, Dict, Optional, Any, Set, Tuple, Deque
 from collections import defaultdict, deque
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -133,8 +126,6 @@ class Card(commands.GroupCog, name="card"):
         
         # First, try to strip any existing prefix/suffix pattern using regex
         # This handles cases where the prefix/suffix might not be in the current config
-        import re
-        
         # Pattern to match common prefix/suffix patterns
         # This will match anything that looks like [prefix]nickname[suffix] or similar
         pattern = r'^(\[.*?\]\s*)?(.+?)(\s*\[.*?\])?$'

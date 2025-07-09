@@ -1,12 +1,6 @@
-import discord
-from discord.ext import commands
-from discord import app_commands
+import discord; from discord import app_commands, File; from discord.ext import commands
 from typing import Dict, List, Optional, Union, Any, Tuple
-import time
-import json
-from datetime import datetime, timedelta
-import io
-from discord import File
+import time, json, io; from datetime import datetime, timedelta
 
 class PermissionCache:
     def __init__(self):

@@ -1,11 +1,6 @@
-import discord
-import sqlite3
-import time
-import asyncio
-import re
-from datetime import datetime
-from discord.ext import commands, tasks
-from discord import app_commands, utils
+import discord; from discord import app_commands, utils; from discord.ext import commands, tasks
+import sqlite3, asyncio, re
+import time; from datetime import datetime
 from typing import Optional, List, Dict, Any, Set, Tuple, Deque
 
 class Wardrobe_cog(commands.Cog):

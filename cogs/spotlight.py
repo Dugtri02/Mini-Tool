@@ -1,16 +1,9 @@
-from optparse import Option
-import discord
-from discord.ext import commands, tasks
-from datetime import datetime, timedelta, timezone
-import pytz
-import random
-import logging
+import discord; from discord import app_commands; from discord.ext import commands, tasks
+from datetime import datetime, timedelta, timezone; import pytz
+import random, logging, asyncio, sqlite3; from optparse import Option
 from typing import Dict, List, Optional, Set, Tuple, Deque
-from collections import deque
-import asyncio
-from dataclasses import dataclass, field
-from discord import app_commands
-import sqlite3
+from collections import deque; from dataclasses import dataclass, field
+
 
 logger = logging.getLogger(__name__)
 

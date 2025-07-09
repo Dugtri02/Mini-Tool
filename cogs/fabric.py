@@ -1,8 +1,5 @@
-import discord
-import sqlite3
-from discord.ext import commands
-from discord import app_commands
-from typing import List, Set
+import discord; from discord import app_commands; from discord.ext import commands
+import sqlite3; from typing import List, Set
 
 class RoleManager(commands.GroupCog, name="role"):
     def __init__(self, bot):

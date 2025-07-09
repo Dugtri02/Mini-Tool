@@ -1,12 +1,7 @@
-import discord
-from discord.ext import commands, tasks
-from discord import app_commands
-from typing import Dict, List, Set, Optional, Union
+import discord; from discord import app_commands; from discord.ext import commands, tasks
+from typing import Dict, List, Set, Optional, Union, Any
 from datetime import datetime, timedelta, timezone
-import sqlite3
-import asyncio
-from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
+import sqlite3, asyncio
 
 class ThreadMonitor(commands.GroupCog, group_name="needle"):    
     """Cog for monitoring and managing thread activity with edit protection."""

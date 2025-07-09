@@ -1,11 +1,6 @@
-import discord
-import time
-import asyncio
-from discord.ext import commands, tasks
-from discord import app_commands
-from typing import Dict, List, Optional, Any, Tuple, Set
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+import discord; from discord import app_commands; from discord.ext import commands, tasks
+import time, asyncio; from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any, Tuple, Set; from dataclasses import dataclass, field
 from collections import defaultdict
 
 # Cache structure to store thread data
