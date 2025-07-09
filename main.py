@@ -1,4 +1,4 @@
-import discord, os, asyncio, logging; from discord.ext import commands
+import discord, os, asyncio, logging, sqlite3; from discord.ext import commands
 
 # Set up logger
 logging.basicConfig(
@@ -8,6 +8,14 @@ logging.basicConfig(
 logger = logging.getLogger()
 
 intents = discord.Intents.all(); bot = commands.Bot(command_prefix="!", intents=intents); bot.remove_command('help')
+
+def setup_database():
+    conn = sqlite3.connect('.db', check_same_thread=False)
+    conn.row_factory = sqlite3.Row  # Enable dictionary-style access
+    return conn
+
+# Store the database connection in the bot instance
+bot.db = setup_database()
 
 @bot.event
 async def on_ready():
