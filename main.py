@@ -1,4 +1,6 @@
 import discord, os, asyncio, logging, sqlite3; from discord.ext import commands
+from dotenv import load_dotenv
+load_dotenv(); TOKEN = os.getenv('TOKEN')
 
 # Set up logger
 logging.basicConfig(
@@ -33,6 +35,5 @@ async def on_ready():
                     logger.error(f'Failed to load cog {filename[:-3]}: {e}')
     await bot.tree.sync()
     
-bot.run('TOKEN') # Replace 'TOKEN' with your bot token as a String or Variable, I recommend using an .env variable
-
-# If you're contributing to the repo do not commit the bot.py file, especially if you left the TOKEN exposed
+if __name__ == '__main__': 
+    bot.run(TOKEN) 
