@@ -1,4 +1,5 @@
-import discord, os, asyncio, logging, sqlite3; from discord.ext import commands
+import discord, os, asyncio, logging, sqlite3, getpass
+from discord.ext import commands
 from dotenv import load_dotenv
 load_dotenv(); TOKEN = os.getenv('TOKEN')
 
@@ -37,7 +38,8 @@ async def on_ready():
     
 if __name__ == '__main__': 
     if TOKEN == "STRING":
-        TOKEN = input("Please enter your Discord bot token: ")
+        print("While providing your bot token, it will not be displayed but it is there...\nsimply copy it and paste it into the prompt below.\n")
+        TOKEN = getpass.getpass("[ALERT] Please enter your Discord bot token: ")
         # Safely update only the TOKEN line in .env
         if os.path.exists('.env'):
             with open('.env', 'r') as f:
