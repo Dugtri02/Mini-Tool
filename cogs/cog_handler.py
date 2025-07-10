@@ -93,11 +93,13 @@ class GitHubCogManager:
         try:
             async with self.session.get(url) as response:
                 if response.status == 200:
-                    content = await response.text()
+                    # Read the raw bytes to preserve original line endings
+                    content = await response.read()
                     # Ensure the parent directory exists
                     final_save_path.parent.mkdir(parents=True, exist_ok=True)
-                    # Save the file
-                    final_save_path.write_text(content, encoding='utf-8')
+                    # Save the file in binary mode to preserve original format
+                    with open(final_save_path, 'wb') as f:
+                        f.write(content)
                     logging.info(f"Successfully downloaded {path} to {final_save_path}")
                     return True
                 logging.error(f"Failed to download {path}: HTTP {response.status}")
@@ -220,6 +222,14 @@ class CogHandler(commands.Cog):
                 failed += 1
 
         self.logger.info(f'Cog loading complete. Loaded: {loaded}, Skipped: {skipped}, Failed: {failed}')
+        
+        # Sync the command tree to update slash commands
+        try:
+            await self.bot.tree.sync()
+            self.logger.info('Successfully synced application commands')
+        except Exception as e:
+            self.logger.error(f'Failed to sync application commands: {str(e)}', exc_info=True)
+            
         return {
             'loaded': loaded,
             'skipped': skipped,
