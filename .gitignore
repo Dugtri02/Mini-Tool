@@ -20,3 +20,6 @@ venv/
 env/
 ENV/
 .venv/
+
+# Ignore these specific files
+LICENSE
