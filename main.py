@@ -36,4 +36,19 @@ async def on_ready():
     await bot.tree.sync()
     
 if __name__ == '__main__': 
-    bot.run(TOKEN) 
+    if TOKEN == "STRING":
+        TOKEN = input("Please enter your Discord bot token: ")
+        # Safely update only the TOKEN line in .env
+        if os.path.exists('.env'):
+            with open('.env', 'r') as f:
+                lines = f.readlines()
+            with open('.env', 'w') as f:
+                for line in lines:
+                    if line.strip().startswith('TOKEN'):
+                        f.write(f'TOKEN = \'{TOKEN}\'\n')
+                    else:
+                        f.write(line)
+        else:
+            with open('.env', 'w') as f:
+                f.write(f'TOKEN = \'{TOKEN}\'\n')
+    bot.run(TOKEN)
