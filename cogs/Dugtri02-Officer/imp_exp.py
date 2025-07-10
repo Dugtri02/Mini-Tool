@@ -1,13 +1,7 @@
 # Import and Export ban lists
 
-import discord
-import asyncio
-import time
-import io
-import re
-from typing import List, Optional, Dict, Any, Tuple
-from discord import app_commands, ui
-from discord.ext import commands
+import discord; from discord import app_commands, ui; from discord.ext import commands
+import asyncio, time, io, re; from typing import List, Optional, Dict, Any, Tuple
 
 class BanImportView(ui.View):
     def __init__(self, importer):
