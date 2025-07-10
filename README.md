@@ -49,3 +49,7 @@ Originally developed by 'Dugtri02' with help from AI tools.
 now being supported with help from the [community](https://discord.gg/Dt8jxXsXwe).
 
 For support, feedback, or to join the community, visit [Molecord](https://discord.gg/Dt8jxXsXwe), our community Discord server.  
+
+## 📦 Setup Instructions
+
+For set-up instructions, [click here](set-up.md).
