@@ -52,4 +52,4 @@ For support, feedback, or to join the community, visit [Molecord](https://discor
 
 ## 📦 Setup Instructions
 
-For set-up instructions, [click here](set-up.md).
+For set-up instructions, [click here](SET-UP.md).
