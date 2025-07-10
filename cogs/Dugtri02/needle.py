@@ -1,3 +1,5 @@
+# Replace create_threads with this set of commands
+
 import discord; from discord import app_commands; from discord.ext import commands, tasks
 from typing import Dict, List, Set, Optional, Union, Any
 from datetime import datetime, timedelta, timezone

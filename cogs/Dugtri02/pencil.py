@@ -1,3 +1,5 @@
+# Use these commands to mass edit channel and role permissions
+
 import discord; from discord import app_commands, File; from discord.ext import commands
 from typing import Dict, List, Optional, Union, Any, Tuple
 import time, json, io; from datetime import datetime, timedelta

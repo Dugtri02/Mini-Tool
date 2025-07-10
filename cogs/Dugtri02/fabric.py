@@ -1,3 +1,5 @@
+# Replace manage_roles permission with this set of commands
+
 import discord; from discord import app_commands; from discord.ext import commands
 import sqlite3; from typing import List, Set
 

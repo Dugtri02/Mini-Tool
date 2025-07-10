@@ -1,3 +1,6 @@
+# Set an initial role and a target role to randomly rotate users out of that target role
+# decently customizable! current implementation maxes out at 8 users but that can be changed
+
 import discord; from discord import app_commands; from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone; import pytz
 import random, logging, asyncio, sqlite3; from optparse import Option

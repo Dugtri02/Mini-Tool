@@ -1,5 +1,4 @@
-# I made this to auto-forward messages from a channel to a thread because I didn't know webhooks
-# could already do that... well now I know so this whole thing is shelfed lol
+# Automatically forward messages between channels/threads
 
 import discord; from discord import app_commands; from discord.ext import commands
 import sqlite3; from typing import Optional, List

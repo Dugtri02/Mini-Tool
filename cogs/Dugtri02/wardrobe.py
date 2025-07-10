@@ -1,3 +1,6 @@
+# Authorize a role (or user) to be able to modify its own or another role's name, color, or icon
+# includes integration with the fabric.py system
+
 import discord; from discord import app_commands, utils; from discord.ext import commands, tasks
 import sqlite3, asyncio, re
 import time; from datetime import datetime

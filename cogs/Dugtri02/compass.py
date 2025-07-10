@@ -1,3 +1,5 @@
+# Thread finder for threads you're part of and can see (as well as the bot can see)
+
 import discord; from discord import app_commands; from discord.ext import commands, tasks
 import time, asyncio; from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Set; from dataclasses import dataclass, field

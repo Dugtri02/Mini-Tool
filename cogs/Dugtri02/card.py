@@ -1,3 +1,5 @@
+# Prefixes and Suffixes based on users highest role
+
 import discord; from discord import app_commands; from discord.ext import commands, tasks
 import time, asyncio, re, sqlite3, logging; from datetime import datetime
 from typing import List, Dict, Optional, Any, Set, Tuple, Deque
