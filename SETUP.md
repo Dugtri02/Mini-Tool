@@ -86,3 +86,4 @@ launch.bat
 Join the [support server](https://discord.gg/exwPCtMEsD) or open an issue on GitHub!
 
 ---
+ 
