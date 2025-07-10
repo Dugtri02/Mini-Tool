@@ -15,7 +15,7 @@ from discord.ext import commands
 class GitHubCogManager:
     """Helper class to interact with GitHub API for cog management."""
     
-    def __init__(self, repo_owner: str, repo_name: str, branch: str = 'cog_handler'):
+    def __init__(self, repo_owner: str, repo_name: str, branch: str = 'main'):
         self.base_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
         self.raw_base_url = f"https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{branch}"
         self.branch = branch
@@ -63,18 +63,47 @@ class GitHubCogManager:
             return []
             
     async def download_file(self, path: str, save_path: Path) -> bool:
-        """Download a file from GitHub and save it locally."""
+        """
+        Download a file from GitHub and save it locally.
+        
+        Args:
+            path: The path to the file in the GitHub repository (e.g., 'cogs/molecord/compass.py')
+            save_path: The local path where the file should be saved
+            
+        Returns:
+            bool: True if download and save were successful, False otherwise
+        """
+        # Remove the 'cogs/' prefix from the path if it exists
+        if path.startswith('cogs/'):
+            relative_path = path[5:]  # Remove 'cogs/'
+        else:
+            relative_path = path
+            
+        # Create the full URL to download from
         url = f"{self.raw_base_url}/{path}"
+        
+        # Create the full local save path, ensuring we don't create an extra 'cogs' directory
+        if str(save_path).startswith('cogs/') or str(save_path).startswith('cogs\\\\'):
+            # If save_path already starts with cogs, use it as is
+            final_save_path = Path(save_path)
+        else:
+            # Otherwise, create the path relative to the cogs directory
+            final_save_path = Path('cogs') / relative_path
+        
         try:
             async with self.session.get(url) as response:
                 if response.status == 200:
                     content = await response.text()
-                    save_path.parent.mkdir(parents=True, exist_ok=True)
-                    save_path.write_text(content, encoding='utf-8')
+                    # Ensure the parent directory exists
+                    final_save_path.parent.mkdir(parents=True, exist_ok=True)
+                    # Save the file
+                    final_save_path.write_text(content, encoding='utf-8')
+                    logging.info(f"Successfully downloaded {path} to {final_save_path}")
                     return True
+                logging.error(f"Failed to download {path}: HTTP {response.status}")
                 return False
         except Exception as e:
-            logging.error(f"Error downloading file {path}: {e}")
+            logging.error(f"Error downloading file {path}: {e}", exc_info=True)
             return False
 
 
@@ -84,7 +113,31 @@ class CogHandler(commands.Cog):
         self.logger = logging.getLogger('cog_handler')
         self.cogs_dir = Path('cogs')
         self.loaded_cogs = set()
-        self.gh_manager = GitHubCogManager("Dugtri02", "Mini-Tool")
+        # Default repository settings
+        self.repo_owner = "Dugtri02"
+        self.repo_name = "Mini-Tool"
+        self.branch = "main"
+        self.gh_manager = GitHubCogManager(self.repo_owner, self.repo_name, self.branch)
+        
+    def update_github_manager(self, repo_owner: str = None, repo_name: str = None, branch: str = None):
+        """Update the GitHub manager with new repository details."""
+        if repo_owner:
+            self.repo_owner = repo_owner
+        if repo_name:
+            self.repo_name = repo_name
+        if branch:
+            self.branch = branch
+            
+        # Close the old session
+        asyncio.create_task(self.gh_manager.close())
+        
+        # Create a new manager with updated settings
+        self.gh_manager = GitHubCogManager(
+            self.repo_owner,
+            self.repo_name,
+            self.branch
+        )
+        return self.gh_manager
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -108,12 +161,13 @@ class CogHandler(commands.Cog):
         
         return cog_files
 
-    async def load_cogs(self, delay: float = 0.5):
+    async def load_cogs(self, delay: float = 1.2, reload_existing: bool = False):
         """
         Load all cogs found in the cogs directory and its subdirectories.
         
         Args:
             delay: Delay in seconds between loading each cog (default: 0.5s)
+            reload_existing: Whether to reload already loaded cogs (default: False)
         """
         self.logger.info(f'Starting to load cogs with {delay}s delay between loads...')
         
@@ -132,21 +186,33 @@ class CogHandler(commands.Cog):
                 self.logger.debug(f'Waiting {delay} seconds before loading next cog...')
                 await asyncio.sleep(delay)
             
-            # Skip if already loaded
-            if module_path in self.loaded_cogs:
+            # Check if cog is already loaded
+            is_loaded = module_path in self.loaded_cogs or module_path in self.bot.extensions
+            
+            if is_loaded and not reload_existing:
                 self.logger.debug(f'Skipping already loaded cog: {module_path}')
                 skipped += 1
                 continue
             
             try:
                 self.logger.info(f'Loading cog {idx}/{len(cog_files)}: {module_path}')
+                
+                # Unload first if reloading
+                if is_loaded and reload_existing:
+                    await self.bot.unload_extension(module_path)
+                    if module_path in self.loaded_cogs:
+                        self.loaded_cogs.remove(module_path)
+                
+                # Load the cog
                 await self.bot.load_extension(module_path)
                 self.loaded_cogs.add(module_path)
-                self.logger.info(f'Successfully loaded cog: {module_path}')
+                
+                action = 'Reloaded' if is_loaded else 'Loaded'
+                self.logger.info(f'{action} cog: {module_path}')
                 loaded += 1
                 
             except commands.ExtensionAlreadyLoaded:
-                self.logger.debug(f'Cog already loaded: {module_path}')
+                self.logger.debug(f'Cog already loaded (race condition?): {module_path}')
                 skipped += 1
                 
             except Exception as e:
@@ -161,18 +227,115 @@ class CogHandler(commands.Cog):
             'total': loaded + skipped + failed
         }
 
-    @commands.hybrid_command(name="managecogs", with_app_command=True)
-    @commands.is_owner()
-    async def manage_cogs(self, ctx: commands.Context):
-        """Manage cogs from GitHub repository (Owner only)."""
-        await self.show_main_menu(ctx)
+    @app_commands.command(name="packages", description="Manage cogs from a GitHub repository (Owner only)")
+    @app_commands.describe(
+        repo_owner="Repository owner (default: Dugtri02)",
+        repo_name="Repository name (default: Mini-Tool)",
+        branch="Branch name (default: main)"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def manage_cogs(
+        self,
+        interaction: discord.Interaction,
+        repo_owner: str = None,
+        repo_name: str = None,
+        branch: str = None
+    ):
+        """
+        Manage cogs from a GitHub repository (Owner only).
+        
+        Args:
+            repo_owner: GitHub repository owner (username/organization)
+            repo_name: GitHub repository name
+            branch: Branch name (default: main)
+        """
+        if not await self.bot.is_owner(interaction.user):
+            await interaction.response.send_message("This command is only available to the bot owner.", ephemeral=True)
+            return
+            
+        # Update repository settings if provided
+        if repo_owner or repo_name or branch:
+            try:
+                self.update_github_manager(repo_owner, repo_name, branch)
+                status_msg = f"✅ Using repository: {self.repo_owner}/{self.repo_name} (branch: {self.branch})"
+            except Exception as e:
+                await interaction.response.send_message(
+                    f"❌ Failed to update repository settings: {e}",
+                    ephemeral=True
+                )
+                return
+        else:
+            status_msg = f"ℹ️ Using default repository: {self.repo_owner}/{self.repo_name} (branch: {self.branch})"
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        # Send initial status message
+        if repo_owner or repo_name or branch:
+            await interaction.followup.send(status_msg, ephemeral=True)
+            
+        await self.show_main_menu(interaction, None)
 
-    async def show_main_menu(self, ctx: Union[commands.Context, discord.Interaction], message: discord.Message = None):
+    async def show_main_menu(self, interaction: discord.Interaction, message: discord.Message = None):
         """Show the main menu with available packages."""
         view = discord.ui.View(timeout=300)
         
+        # Add repo info button
+        async def repo_info_callback(btn_interaction: discord.Interaction):
+            if btn_interaction.user.id != interaction.user.id:
+                await btn_interaction.response.send_message("This is not your menu!", ephemeral=True)
+                return
+                
+            embed = discord.Embed(
+                title="Repository Information",
+                description=(
+                    f"**Repository:** {self.repo_owner}/{self.repo_name}\n"
+                    f"**Branch:** {self.branch}\n\n"
+                    "To change the repository, use the command with parameters:\n"
+                    "`/managecogs repo_owner:username repo_name:repository branch:main`"
+                ),
+                color=discord.Color.blue()
+            )
+            await btn_interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        repo_info_btn = discord.ui.Button(label="ℹ️ Repo Info", style=discord.ButtonStyle.secondary)
+        repo_info_btn.callback = repo_info_callback
+        view.add_item(repo_info_btn)
+        
+        # Add refresh button
+        async def refresh_callback(btn_interaction: discord.Interaction):
+            if btn_interaction.user.id != interaction.user.id:
+                await btn_interaction.response.send_message("This is not your menu!", ephemeral=True)
+                return
+                
+            await btn_interaction.response.defer(ephemeral=True)
+            await self.show_main_menu(interaction, None)
+        
+        refresh_btn = discord.ui.Button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
+        refresh_btn.callback = refresh_callback
+        view.add_item(refresh_btn)
+        
         # Fetch packages from GitHub
-        packages = await self.gh_manager.get_subfolders('cogs')
+        try:
+            packages = await self.gh_manager.get_subfolders('cogs')
+        except Exception as e:
+            self.logger.error(f"Error fetching packages: {e}", exc_info=True)
+            error_embed = discord.Embed(
+                title="Error",
+                description=(
+                    f"Failed to fetch packages from {self.repo_owner}/{self.repo_name} (branch: {self.branch})\n"
+                    f"Error: {str(e)}\n\n"
+                    "Please check the repository details and try again."
+                ),
+                color=discord.Color.red()
+            )
+            # Create an empty view for error messages
+            error_view = discord.ui.View(timeout=180)  # 3 minute timeout
+            
+            if message:
+                await message.edit(embed=error_embed, view=error_view)
+            else:
+                await interaction.followup.send(embed=error_embed, view=error_view)
+            return
         
         if not packages:
             embed = discord.Embed(
@@ -180,15 +343,17 @@ class CogHandler(commands.Cog):
                 description="No packages found in the repository.",
                 color=discord.Color.red()
             )
+            # Create an empty view for the no packages message
+            empty_view = discord.ui.View(timeout=180)
             if message:
-                await message.edit(embed=embed, view=None)
+                await message.edit(embed=embed, view=empty_view)
             else:
-                await ctx.send(embed=embed)
+                await interaction.followup.send(embed=embed, view=empty_view, ephemeral=True)
             return
         
         # Create package selection dropdown
         select = discord.ui.Select(
-            placeholder="Select a package",
+            placeholder="Select a package to view cogs",
             min_values=1,
             max_values=1,
             options=[
@@ -197,31 +362,100 @@ class CogHandler(commands.Cog):
             ]
         )
         
-        async def select_callback(interaction: discord.Interaction):
-            if interaction.user.id != ctx.author.id:
-                await interaction.response.send_message("This is not your menu!", ephemeral=True)
+        async def select_callback(menu_interaction: discord.Interaction):
+            if menu_interaction.user.id != interaction.user.id:
+                await menu_interaction.response.send_message("This is not your menu!", ephemeral=True)
                 return
                 
-            selected_path = interaction.data['values'][0]
-            await self.show_package_cogs(interaction, selected_path)
+            selected_path = menu_interaction.data['values'][0]
+            await menu_interaction.response.defer()
+            await self.show_package_cogs(menu_interaction, selected_path)
         
         select.callback = select_callback
         view.add_item(select)
         
         embed = discord.Embed(
             title="Cog Manager",
-            description="Select a package to manage its cogs:",
+            description="Select a package to view available cogs:",
             color=discord.Color.blue()
         )
         
         if message:
             await message.edit(embed=embed, view=view)
         else:
-            await ctx.send(embed=embed, view=view)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
     
+    def is_cog_loaded(self, cog_path: str) -> bool:
+        """Check if a cog is currently loaded in the bot."""
+        # Convert path to module path format (e.g., 'cogs/fun/example.py' -> 'cogs.fun.example')
+        if cog_path.startswith('cogs/'):
+            cog_path = cog_path[5:]  # Remove 'cogs/' prefix if present
+        module_path = cog_path.replace('/', '.').replace('\\', '.').replace('.py', '')
+        
+        # Check if the module is in loaded_cogs or bot.extensions
+        return (f'cogs.{module_path}' in self.loaded_cogs or 
+                f'cogs.{module_path}' in self.bot.extensions)
+    
+    def is_cog_downloaded(self, cog_path: str) -> bool:
+        """Check if a cog file exists in the local cogs directory."""
+        # Convert path to local file path
+        if not cog_path.startswith('cogs/'):
+            cog_path = f'cogs/{cog_path}'
+        local_path = Path(cog_path)
+        return local_path.exists()
+
     async def show_package_cogs(self, interaction: discord.Interaction, package_path: str):
         """Show cogs available in a package."""
         view = discord.ui.View(timeout=300)
+        
+        # Add back to main menu button
+        async def back_callback(btn_interaction: discord.Interaction):
+            if btn_interaction.user.id != interaction.user.id:
+                await btn_interaction.response.send_message("This is not your menu!", ephemeral=True)
+                return
+                
+            await btn_interaction.response.defer(ephemeral=True)
+            await self.show_main_menu(interaction, None)
+        
+        back_btn = discord.ui.Button(label="⬅️ Back to Packages", style=discord.ButtonStyle.secondary)
+        back_btn.callback = back_callback
+        view.add_item(back_btn)
+        
+        # Add repo info button
+        async def repo_info_callback(btn_interaction: discord.Interaction):
+            if btn_interaction.user.id != interaction.user.id:
+                await btn_interaction.response.send_message("This is not your menu!", ephemeral=True)
+                return
+                
+            embed = discord.Embed(
+                title="Repository Information",
+                description=(
+                    f"**Repository:** {self.repo_owner}/{self.repo_name}\n"
+                    f"**Branch:** {self.branch}\n"
+                    f"**Current Package:** `{package_path}`\n\n"
+                    "To change the repository, use the command with parameters:\n"
+                    "`/managecogs repo_owner:username repo_name:repository branch:main`"
+                ),
+                color=discord.Color.blue()
+            )
+            await btn_interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        repo_info_btn = discord.ui.Button(label="ℹ️ Repo Info", style=discord.ButtonStyle.secondary)
+        repo_info_btn.callback = repo_info_callback
+        view.add_item(repo_info_btn)
+        
+        # Add refresh button
+        async def refresh_callback(btn_interaction: discord.Interaction):
+            if btn_interaction.user.id != interaction.user.id:
+                await btn_interaction.response.send_message("This is not your menu!", ephemeral=True)
+                return
+                
+            await btn_interaction.response.defer(ephemeral=True)
+            await self.show_package_cogs(interaction, package_path)
+        
+        refresh_btn = discord.ui.Button(label="🔄 Refresh", style=discord.ButtonStyle.primary)
+        refresh_btn.callback = refresh_callback
+        view.add_item(refresh_btn)
         
         # Fetch cogs from the selected package
         cogs = await self.gh_manager.get_cog_files(package_path)
@@ -232,50 +466,72 @@ class CogHandler(commands.Cog):
                 description="No cogs found in this package.",
                 color=discord.Color.red()
             )
-            await interaction.response.edit_message(embed=embed, view=None)
+            empty_view = discord.ui.View(timeout=180)
+            if hasattr(interaction, 'response') and not interaction.response.is_done():
+                await interaction.response.send_message(embed=embed, view=empty_view, ephemeral=True)
+            else:
+                await interaction.followup.send(embed=embed, view=empty_view, ephemeral=True)
             return
         
-        # Create cog selection dropdown
+        # Create cog selection dropdown with status indicators
         select = discord.ui.Select(
             placeholder="Select cogs to download/update",
             min_values=1,
             max_values=len(cogs),
-            options=[
-                discord.SelectOption(label=cog['name'], value=cog['path'])
-                for cog in cogs
-            ]
+            options=[]
         )
         
-        async def download_callback(interaction: discord.Interaction):
-            if interaction.user.id != interaction.message.interaction.user.id:
-                await interaction.response.send_message("This is not your menu!", ephemeral=True)
+        # Add cogs to dropdown with status indicators
+        for cog in cogs:
+            is_loaded = self.is_cog_loaded(cog['path'])
+            is_downloaded = self.is_cog_downloaded(cog['path'])
+            
+            # Create label with status indicators
+            status = []
+            if is_loaded:
+                status.append("🟢")  # Green circle for loaded
+            elif is_downloaded:
+                status.append("🔵")  # Blue circle for downloaded but not loaded
+            else:
+                status.append("⚪")  # White circle for not downloaded
+                
+            label = f"{' '.join(status)} {cog['name']}"
+            
+            # Add description based on status
+            description = None
+            if is_loaded:
+                description = "Loaded and ready to use"
+            elif is_downloaded:
+                description = "Downloaded but not loaded"
+                
+            select.add_option(
+                label=label,
+                value=cog['path'],
+                description=description,
+                emoji=None  # We're already adding emoji to the label
+            )
+        
+        async def download_callback(menu_interaction: discord.Interaction):
+            if menu_interaction.user.id != interaction.user.id:
+                await menu_interaction.response.send_message("This is not your menu!", ephemeral=True)
                 return
                 
-            selected_paths = interaction.data['values']
-            await self.download_cogs(interaction, selected_paths)
+            selected_paths = menu_interaction.data['values']
+            await menu_interaction.response.defer()
+            await self.download_cogs(menu_interaction, selected_paths)
         
-        async def back_callback(interaction: discord.Interaction):
-            if interaction.user.id != interaction.message.interaction.user.id:
-                await interaction.response.send_message("This is not your menu!", ephemeral=True)
-                return
-            
-            ctx = await self.bot.get_context(interaction.message)
-            await self.show_main_menu(ctx, interaction.message)
-        
+        # Set up the select menu callback
         select.callback = download_callback
-        back_btn = discord.ui.Button(label="← Back", style=discord.ButtonStyle.secondary)
-        back_btn.callback = back_callback
-        
         view.add_item(select)
-        view.add_item(back_btn)
         
+        # Create the embed for the package view
         embed = discord.Embed(
             title=f"Package: {package_path}",
             description="Select cogs to download/update:",
             color=discord.Color.blue()
         )
         
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
     
     async def download_cogs(self, interaction: discord.Interaction, cog_paths: List[str]):
         """Download selected cogs from GitHub."""
@@ -287,13 +543,15 @@ class CogHandler(commands.Cog):
             color=discord.Color.blue()
         )
         
-        message = await interaction.followup.send(embed=embed, wait=True)
+        # Send initial message
+        message = await interaction.followup.send(embed=embed, wait=True, ephemeral=True)
         
+        # Download cogs
         results = []
         for path in cog_paths:
             cog_name = Path(path).name
-            save_path = Path("cogs") / path
-            success = await self.gh_manager.download_file(path, save_path)
+            # Pass the path directly - download_file will handle the 'cogs/' prefix
+            success = await self.gh_manager.download_file(path, Path(path))
             results.append((cog_name, success))
         
         # Update with results
@@ -320,6 +578,7 @@ class CogHandler(commands.Cog):
                 await btn_interaction.response.send_message("You didn't start this interaction!", ephemeral=True)
                 return
                 
+            await btn_interaction.response.defer(ephemeral=True)
             await self.reload_cogs(btn_interaction)
         
         reload_btn = discord.ui.Button(label="🔄 Reload Cogs", style=discord.ButtonStyle.primary)
@@ -336,13 +595,15 @@ class CogHandler(commands.Cog):
             color=discord.Color.blue()
         )
         
-        if isinstance(interaction, discord.Interaction):
-            await interaction.response.edit_message(embed=embed, view=None)
-            message = interaction.message
+        if interaction.response.is_done():
+            message = await interaction.followup.send(embed=embed, wait=True, ephemeral=True)
         else:
-            message = await interaction.channel.send(embed=embed)
+            await interaction.response.defer(ephemeral=True)
+            message = await interaction.original_response()
+            await message.edit(embed=embed)
         
-        status = await self.load_cogs()
+        # Force reload of all cogs, including those already loaded
+        status = await self.load_cogs(reload_existing=True)
         
         embed = discord.Embed(
             title='Cog Reload Status',
@@ -355,11 +616,15 @@ class CogHandler(commands.Cog):
         
         await message.edit(embed=embed, view=None)
     
-    @commands.hybrid_command(name="reloadcogs", with_app_command=True)
-    @commands.is_owner()
-    async def reload_cogs_command(self, ctx: commands.Context):
+    @app_commands.command(name="reloadcogs", description="Reload all cogs (Owner only)")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def reload_cogs_command(self, interaction: discord.Interaction):
         """Reload all cogs (Owner only)."""
-        await self.reload_cogs(ctx)
+        if not await self.bot.is_owner(interaction.user):
+            await interaction.response.send_message("This command is only available to the bot owner.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        await self.reload_cogs(interaction)
 
     def cog_unload(self):
         """Clean up resources when the cog is unloaded."""

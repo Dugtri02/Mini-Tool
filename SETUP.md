@@ -4,6 +4,9 @@
 > This bot is developed and tested with **Python 3.11.x** (most development on 3.11.4).  
 > **Python 3.12.x, 3.13.x, or higher are NOT supported and will likely not work.**  
 > Please use Python 3.11.x for best compatibility.
+>
+> 👉 **Download Python 3.11.x for Windows here:**  
+> [https://www.python.org/downloads/windows/](https://www.python.org/downloads/windows/)
 
 ## 1️⃣ Folder Structure
 
@@ -17,9 +20,11 @@
 > ├── requirements.txt
 > ├── .env
 > ├── cogs/
-> │   ├── card.py
-> │   ├── compass.py
-> │   └── ...etc
+> │   ├── cog_handler.py
+> │   └── molecord/
+> │       ├── card.py
+> |       ├── fabric.py
+> │       └── etc...
 > └── SETUP.md
 > ```
 >
@@ -31,6 +36,10 @@
 ---
 
 ## 2️⃣ Install Requirements
+
+> **Note:**  
+> The `requirements.txt` file only includes packages required for cogs in the `molecord` directory from the official Mini-Tool repository.  
+> If you add other cogs or custom features, you may need to install additional dependencies.
 
 ```sh
 pip install -r requirements.txt
@@ -86,4 +95,3 @@ launch.bat
 Join the [support server](https://discord.gg/exwPCtMEsD) or open an issue on GitHub!
 
 ---
- 
