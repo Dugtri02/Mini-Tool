@@ -92,7 +92,7 @@ class Spotlight(commands.GroupCog, name="spotlight"):
         self.rotation_task = self.rotate_spotlight.start()
         self.role_processor_task = self.bot.loop.create_task(self.process_role_queue())
         self._create_tables()
-        self._last_config_index = 0  # Track the last processed config index
+        self._last_config_index = 0  # Track the last processed config
     
     def cog_unload(self):
         self.rotation_task.cancel()
@@ -1475,21 +1475,8 @@ class Spotlight(commands.GroupCog, name="spotlight"):
                 
                 # Check if rotation is due
                 if current_time >= next_rotation_dt:
-                    time_since_last = current_time - last_rotation_dt
-                    if interval == 5:  # Debug mode
-                        seconds_in_interval = 60
-                    else:
-                        seconds_in_interval = interval * 3600
-                    
-                    intervals_passed = time_since_last.total_seconds() // seconds_in_interval
-                    
-                    logger.debug(f"[ROTATION] Config {config_id}: time_since_last={time_since_last}, intervals_passed={intervals_passed}")
-                    
-                    if intervals_passed >= 1:
-                        due_configs.append(row)
-                        logger.info(f"[ROTATION] Config {config_id} is DUE for rotation - {intervals_passed} intervals passed")
-                    else:
-                        logger.debug(f"[ROTATION] Config {config_id} not due - less than 1 interval passed")
+                    due_configs.append(row)
+                    logger.info(f"[ROTATION] Config {config_id} is DUE for rotation")
                 else:
                     time_until_next = next_rotation_dt - current_time
                     logger.debug(f"[ROTATION] Config {config_id} not due - {time_until_next} until next rotation")
@@ -1564,7 +1551,8 @@ class Spotlight(commands.GroupCog, name="spotlight"):
                 
                 # Get blacklisted roles
                 blacklisted_roles = []
-                for role_id in [blacklisted_role_id, blacklisted_role_id_2, blacklisted_role_id_3, blacklisted_role_id_4]:
+                for role_id in [blacklisted_role_id, blacklisted_role_id_2, 
+                              blacklisted_role_id_3, blacklisted_role_id_4]:
                     if role_id:
                         role = guild.get_role(role_id)
                         if role:
@@ -1690,59 +1678,70 @@ class Spotlight(commands.GroupCog, name="spotlight"):
                     else:
                         random.shuffle(eligible_replacements)
                     
-                    # Replace current spotlight members
-                    if current_spotlight and eligible_replacements:
-                        num_to_replace = min(len(current_spotlight), len(eligible_replacements))
-                        
-                        if num_to_replace > 0:
-                            users_to_remove = random.sample(current_spotlight, num_to_replace)
-                            users_to_add = eligible_replacements[:num_to_replace]
+                    # If no current members, add all eligible replacements
+                    if not current_spotlight:
+                        logger.debug(f"[ROTATION] Config {config_id}: No current spotlight members, adding all eligible replacements")
+                        selected_members = eligible_replacements[:max_users]
+                        for member in selected_members:
+                            try:
+                                await self.queue_role_operation(member, target_role, True)
+                                addition_count += 1
+                                logger.debug(f"[ROTATION] Queued addition of {target_role.name} to {member.display_name}")
+                            except Exception as e:
+                                logger.error(f"[ROTATION] Error adding role to {member.display_name}: {e}")
+                                role_operation_errors.append(f"Add role to {member.display_name}: {e}")
+                    else:
+                        # Replace current spotlight members
+                        if current_spotlight and eligible_replacements:
+                            num_to_replace = min(len(current_spotlight), len(eligible_replacements))
                             
-                            # Remove roles from selected current members
-                            for member in users_to_remove:
-                                try:
-                                    await self.queue_role_operation(member, target_role, False)
-                                    removal_count += 1
-                                    logger.debug(f"[ROTATION] Queued removal of {target_role.name} from {member.display_name}")
-                                except Exception as e:
-                                    logger.error(f"[ROTATION] Error removing role from {member.display_name}: {e}")
-                                    role_operation_errors.append(f"Remove role from {member.display_name}: {e}")
-                            
-                            # Add roles to replacement members
-                            for member in users_to_add:
-                                try:
-                                    await self.queue_role_operation(member, target_role, True)
-                                    addition_count += 1
-                                    logger.debug(f"[ROTATION] Queued addition of {target_role.name} to {member.display_name}")
-                                except Exception as e:
-                                    logger.error(f"[ROTATION] Error adding role to {member.display_name}: {e}")
-                                    role_operation_errors.append(f"Add role to {member.display_name}: {e}")
-                            
-                            logger.debug(f"[ROTATION] Config {config_id}: Replaced {num_to_replace} spotlight members")
-                            
-                            # Fill remaining slots if any
-                            current_spotlight_after_replacement = len(current_spotlight) - len(users_to_remove) + len(users_to_add)
-                            remaining_slots = max(0, max_users - current_spotlight_after_replacement)
-                            
-                            if remaining_slots > 0:
-                                available_replacements = [m for m in eligible_replacements if m not in users_to_add]
-                                additional_members = available_replacements[:remaining_slots]
+                            if num_to_replace > 0:
+                                users_to_remove = random.sample(current_spotlight, num_to_replace)
+                                users_to_add = eligible_replacements[:num_to_replace]
                                 
-                                for member in additional_members:
+                                # Remove roles from selected current members
+                                for member in users_to_remove:
+                                    try:
+                                        await self.queue_role_operation(member, target_role, False)
+                                        removal_count += 1
+                                        logger.debug(f"[ROTATION] Queued removal of {target_role.name} from {member.display_name}")
+                                    except Exception as e:
+                                        logger.error(f"[ROTATION] Error removing role from {member.display_name}: {e}")
+                                        role_operation_errors.append(f"Remove role from {member.display_name}: {e}")
+                                
+                                # Add roles to replacement members
+                                for member in users_to_add:
                                     try:
                                         await self.queue_role_operation(member, target_role, True)
                                         addition_count += 1
-                                        logger.debug(f"[ROTATION] Queued addition of {target_role.name} to {member.display_name} (filling slot)")
+                                        logger.debug(f"[ROTATION] Queued addition of {target_role.name} to {member.display_name}")
                                     except Exception as e:
                                         logger.error(f"[ROTATION] Error adding role to {member.display_name}: {e}")
                                         role_operation_errors.append(f"Add role to {member.display_name}: {e}")
                                 
-                                logger.debug(f"[ROTATION] Config {config_id}: Added {len(additional_members)} additional members")
+                                logger.debug(f"[ROTATION] Config {config_id}: Replaced {num_to_replace} spotlight members")
+                                
+                                # Fill remaining slots if any
+                                current_spotlight_after_replacement = len(current_spotlight) - len(users_to_remove) + len(users_to_add)
+                                remaining_slots = max(0, max_users - current_spotlight_after_replacement)
+                                
+                                if remaining_slots > 0:
+                                    available_replacements = [m for m in eligible_replacements if m not in users_to_add]
+                                    additional_members = available_replacements[:remaining_slots]
+                                    
+                                    for member in additional_members:
+                                        try:
+                                            await self.queue_role_operation(member, target_role, True)
+                                            addition_count += 1
+                                            logger.debug(f"[ROTATION] Queued addition of {target_role.name} to {member.display_name} (filling slot)")
+                                        except Exception as e:
+                                            logger.error(f"[ROTATION] Error adding role to {member.display_name}: {e}")
+                                            role_operation_errors.append(f"Add role to {member.display_name}: {e}")
+                                
+                                    logger.debug(f"[ROTATION] Config {config_id}: Added {len(additional_members)} additional members")
                         else:
                             logger.debug(f"[ROTATION] Config {config_id}: No members to replace")
-                    else:
-                        logger.debug(f"[ROTATION] Config {config_id}: No current spotlight members or eligible replacements")
-                
+                    
                 else:
                     # Standard rotation - remove non-selected, add selected
                     logger.debug(f"[ROTATION] Config {config_id}: Using standard rotation strategy")
@@ -1771,7 +1770,7 @@ class Spotlight(commands.GroupCog, name="spotlight"):
                 
                 logger.info(f"[ROTATION] Config {config_id}: Queued {removal_count} removals and {addition_count} additions")
                 
-                # Update last_rotation only if no role operation errors
+                # Update last rotation only if no role operation errors
                 if not role_operation_errors:
                     # Calculate the scheduled rotation time
                     rotation_time = current_time
