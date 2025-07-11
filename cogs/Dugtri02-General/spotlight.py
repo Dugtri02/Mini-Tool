@@ -1415,153 +1415,176 @@ class Spotlight(commands.GroupCog, name="spotlight"):
         """Rotate spotlight users for configurations that are due for rotation"""
         cursor = self.db.cursor()
         current_time = datetime.now(timezone.utc)
-
-        # Get all configs that need processing
+        
+        logger.debug(f"[ROTATION] Starting rotation check at {current_time.isoformat()}")
+        
+        # Get all configurations
         cursor.execute('''
-                SELECT id, guild_id, initial_role_id, target_role_id, max_users,
-                    COALESCE(rotation_interval_hours, 1) as rotation_interval_hours,
-                    last_rotation,
-                    prioritize_active,
-                    ignore_timed_out,
-                    blacklisted_role_id,
-                    always_replace_current,
-                    blacklisted_role_id_2,
-                    blacklisted_role_id_3,
-                    blacklisted_role_id_4
-                FROM spotlight
-                WHERE guild_id IS NOT NULL
-            ''')
+            SELECT id, guild_id, initial_role_id, target_role_id, max_users,
+                COALESCE(rotation_interval_hours, 1) as rotation_interval_hours,
+                last_rotation,
+                prioritize_active,
+                ignore_timed_out,
+                blacklisted_role_id,
+                always_replace_current,
+                blacklisted_role_id_2,
+                blacklisted_role_id_3,
+                blacklisted_role_id_4
+            FROM spotlight
+            WHERE guild_id IS NOT NULL
+        ''')
 
         all_configs = cursor.fetchall()
-
-        # Only fetch configs that are due for rotation
+        logger.debug(f"[ROTATION] Found {len(all_configs)} total configurations")
+        
         due_configs = []
+        
+        # Determine which configs are due for rotation
         for row in all_configs:
             config_id, guild_id, initial_role_id, target_role_id, max_users, interval, last_rotation, prioritize_active, ignore_timed_out, blacklisted_role_id, always_replace_current, blacklisted_role_id_2, blacklisted_role_id_3, blacklisted_role_id_4 = row
-
+            
+            logger.debug(f"[ROTATION] Checking config {config_id} (Guild: {guild_id})")
+            logger.debug(f"[ROTATION] Config {config_id}: last_rotation={last_rotation}, interval={interval}h")
+            
+            # First rotation - no last_rotation timestamp
             if last_rotation is None:
-                # Never rotated, needs rotation
                 due_configs.append(row)
-                logger.debug(f"[ROTATION] Config {config_id} never rotated, queuing")
+                logger.debug(f"[ROTATION] Config {config_id} never rotated, adding to due list")
                 continue
-
-            # Parse the last rotation time
+            
             try:
-                # Ensure we have a timezone-aware datetime
-                last_rotation_dt = datetime.fromisoformat(last_rotation) if isinstance(last_rotation,
-                                                                                    str) else last_rotation
+                # Normalize last_rotation to datetime with timezone
+                if isinstance(last_rotation, str):
+                    last_rotation_dt = datetime.fromisoformat(last_rotation)
+                else:
+                    last_rotation_dt = last_rotation
+                
+                # Ensure timezone is set
                 if last_rotation_dt.tzinfo is None:
                     last_rotation_dt = last_rotation_dt.replace(tzinfo=timezone.utc)
-
+                    logger.debug(f"[ROTATION] Config {config_id}: Added UTC timezone to last_rotation")
+                
                 # Calculate next rotation time
-                if interval == 5:  # Debug mode: 1 minute
+                if interval == 5:  # Debug mode: 1 minute intervals
                     next_rotation_dt = last_rotation_dt + timedelta(minutes=1)
+                    logger.debug(f"[ROTATION] Config {config_id}: Debug mode - 1 minute interval")
                 else:
                     next_rotation_dt = last_rotation_dt + timedelta(hours=interval)
-
-                # Check if rotation is due - allow for any time past the next rotation
-                # This handles cases where the bot was offline or the cog was reloaded
+                
+                logger.debug(f"[ROTATION] Config {config_id}: last_rotation={last_rotation_dt.isoformat()}, next_rotation={next_rotation_dt.isoformat()}, current={current_time.isoformat()}")
+                
+                # Check if rotation is due
                 if current_time >= next_rotation_dt:
-                    # Calculate how many full intervals have passed since last rotation
                     time_since_last = current_time - last_rotation_dt
-                    seconds_in_interval = interval * 3600
+                    if interval == 5:  # Debug mode
+                        seconds_in_interval = 60
+                    else:
+                        seconds_in_interval = interval * 3600
+                    
                     intervals_passed = time_since_last.total_seconds() // seconds_in_interval
                     
-                    # Debug log the calculation
-                    logger.debug(
-                        f"[ROTATION] Time since last: {time_since_last}, "
-                        f"Interval: {interval}h, "
-                        f"Intervals passed: {intervals_passed}"
-                    )
+                    logger.debug(f"[ROTATION] Config {config_id}: time_since_last={time_since_last}, intervals_passed={intervals_passed}")
                     
-                    # Only process if at least one full interval has passed
                     if intervals_passed >= 1:
                         due_configs.append(row)
-                        logger.debug(
-                            f"[ROTATION] Config {config_id} is due for rotation. "
-                            f"Last: {last_rotation_dt.isoformat()}, "
-                            f"Next: {next_rotation_dt.isoformat()}, "
-                            f"Current: {current_time.isoformat()}, "
-                            f"Intervals passed: {intervals_passed}"
-                        )
-
+                        logger.info(f"[ROTATION] Config {config_id} is DUE for rotation - {intervals_passed} intervals passed")
+                    else:
+                        logger.debug(f"[ROTATION] Config {config_id} not due - less than 1 interval passed")
+                else:
+                    time_until_next = next_rotation_dt - current_time
+                    logger.debug(f"[ROTATION] Config {config_id} not due - {time_until_next} until next rotation")
+                    
             except Exception as e:
-                logger.error(f"Error processing rotation for config {config_id}: {e}", exc_info=True)
-
-        # Sort by last_rotation (oldest first) and take all due configs
-        due_configs.sort(key=lambda x: (x[6] is not None, x[6] or datetime.min))  # Sort with None first, then by date
-
+                logger.error(f"[ROTATION] Error processing due check for config {config_id}: {e}", exc_info=True)
+                logger.error(f"[ROTATION] Config {config_id}: last_rotation raw value: {repr(last_rotation)}")
+                # Skip this config - don't add to due_configs if we can't parse the date
+                continue
+        
+        # Sort due configs by last_rotation (None first, then by date)
+        due_configs.sort(key=lambda x: (x[6] is not None, x[6] or datetime.min))
+        
+        # logger.info(f"[ROTATION] Found {len(due_configs)} configurations due for rotation")
+        
         if not due_configs:
-            return  # No configs due for rotation
-
-        # Process all due configs
+            logger.debug("[ROTATION] No configurations due for rotation")
+            return
+        
+        # Process each due configuration
         for row in due_configs:
             config_id, guild_id, initial_role_id, target_role_id, max_users, rotation_interval, last_rotation, prioritize_active, ignore_timed_out, blacklisted_role_id, always_replace_current, blacklisted_role_id_2, blacklisted_role_id_3, blacklisted_role_id_4 = row
-
-            logger.info(f"[ROTATION] Processing config {config_id} (Guild: {guild_id})")
-
-            # Log the next rotation time for debugging
+            
+            logger.info(f"[ROTATION] PROCESSING due config {config_id} (Guild: {guild_id})")
+            
+            # Calculate expected rotation time for logging
             if last_rotation:
-                last_rotation_dt = datetime.fromisoformat(last_rotation) if isinstance(last_rotation,
-                                                                                    str) else last_rotation
-                if last_rotation_dt.tzinfo is None:
-                    last_rotation_dt = last_rotation_dt.replace(tzinfo=timezone.utc)
-                next_rotation = last_rotation_dt + timedelta(hours=rotation_interval)
-                logger.debug(f"[ROTATION] Next rotation for config {config_id} scheduled for {next_rotation}")
+                try:
+                    if isinstance(last_rotation, str):
+                        last_rotation_dt = datetime.fromisoformat(last_rotation)
+                    else:
+                        last_rotation_dt = last_rotation
+                    
+                    if last_rotation_dt.tzinfo is None:
+                        last_rotation_dt = last_rotation_dt.replace(tzinfo=timezone.utc)
+                    
+                    next_rotation = last_rotation_dt + timedelta(hours=rotation_interval)
+                    logger.debug(f"[ROTATION] Config {config_id}: Expected rotation time was {next_rotation.isoformat()}")
+                except Exception as e:
+                    logger.error(f"[ROTATION] Error calculating expected rotation time for config {config_id}: {e}")
             else:
-                logger.debug(f"[ROTATION] First rotation for new config {config_id}")
-
-            # Process the selected config
+                logger.debug(f"[ROTATION] Config {config_id}: First rotation for new configuration")
+            
+            # Begin transaction for this config
             try:
+                # Get guild and validate
                 guild = self.bot.get_guild(guild_id)
-
                 if not guild:
                     logger.warning(f"[ROTATION] Guild {guild_id} not found for config {config_id} - removing configuration")
-                    # Remove the configuration since the bot is no longer in this guild
                     cursor.execute('DELETE FROM spotlight WHERE id = ?', (config_id,))
                     self.db.commit()
                     logger.info(f"[ROTATION] Removed configuration {config_id} for guild {guild_id} (bot not in guild)")
                     continue
-
+                
+                # Get roles and validate
                 initial_role = guild.get_role(initial_role_id)
                 target_role = guild.get_role(target_role_id)
-                # Get all blacklisted roles
+                
+                if not initial_role:
+                    logger.error(f"[ROTATION] Initial role {initial_role_id} not found in guild {guild_id}")
+                    cursor.execute('DELETE FROM spotlight WHERE id = ?', (config_id,))
+                    self.db.commit()
+                    logger.info(f"[ROTATION] Removed configuration {config_id} for guild {guild_id} (initial role not found)")
+                    continue
+                
+                if not target_role:
+                    logger.error(f"[ROTATION] Target role {target_role_id} not found in guild {guild_id}")
+                    cursor.execute('DELETE FROM spotlight WHERE id = ?', (config_id,))
+                    self.db.commit()
+                    logger.info(f"[ROTATION] Removed configuration {config_id} for guild {guild_id} (target role not found)")
+                    continue
+                
+                # Get blacklisted roles
                 blacklisted_roles = []
                 for role_id in [blacklisted_role_id, blacklisted_role_id_2, blacklisted_role_id_3, blacklisted_role_id_4]:
                     if role_id:
                         role = guild.get_role(role_id)
                         if role:
                             blacklisted_roles.append(role)
-
-                if not initial_role:
-                    logger.error(f"[ROTATION] Initial role {initial_role_id} not found in guild {guild_id}")
-                    # Remove the configuration since the initial role doesn't exist
-                    cursor.execute('DELETE FROM spotlight WHERE id = ?', (config_id,))
-                    self.db.commit()
-                    logger.info(
-                        f"[ROTATION] Removed configuration {config_id} for guild {guild_id} (initial role not found)")
-                    continue
-
-                if not target_role:
-                    logger.error(f"[ROTATION] Target role {target_role_id} not found in guild {guild_id}")
-                    # Remove the configuration since the target role doesn't exist
-                    cursor.execute('DELETE FROM spotlight WHERE id = ?', (config_id,))
-                    self.db.commit()
-                    logger.info(
-                        f"[ROTATION] Removed configuration {config_id} for guild {guild_id} (target role not found)")
-                    continue
-
-                # Get current spotlight members before any changes
+                
+                logger.debug(f"[ROTATION] Config {config_id}: Found {len(blacklisted_roles)} blacklisted roles")
+                
+                # Get current spotlight members
                 current_spotlight = []
                 for member in guild.members:
                     try:
-                        if (target_role in member.roles and initial_role in member.roles):
+                        if target_role in member.roles and initial_role in member.roles:
                             current_spotlight.append(member)
                     except Exception as e:
                         logger.warning(f"[ROTATION] Error checking current spotlight member {member.id}: {e}")
                         continue
-
-                # Get all eligible non-bot members with the initial role and not in any blacklisted roles
+                
+                logger.debug(f"[ROTATION] Config {config_id}: Found {len(current_spotlight)} current spotlight members")
+                
+                # Get all eligible members
                 all_eligible = []
                 for member in guild.members:
                     try:
@@ -1571,289 +1594,245 @@ class Spotlight(commands.GroupCog, name="spotlight"):
                     except Exception as e:
                         logger.warning(f"[ROTATION] Error processing member {member.id}: {e}")
                         continue
-
-                logger.debug(f"[ROTATION] Found {len(all_eligible)} eligible members after filtering")
-
+                
+                logger.debug(f"[ROTATION] Config {config_id}: Found {len(all_eligible)} eligible members after filtering")
+                
                 if not all_eligible:
                     logger.warning(f"[ROTATION] No eligible members found for config {config_id}")
                     continue
-
-                # Initialize offline_members as empty list by default
+                
+                # Filter members based on activity and timeout status
+                active_members = []
                 offline_members = []
-
-                if prioritize_active:
-                    active_members = []
-                    offline_members = []
-                    
-                    for member in all_eligible:
-                        try:
+                
+                for member in all_eligible:
+                    try:
+                        # Check if member is timed out
+                        is_timed_out = getattr(member, 'timed_out_until', None) is not None
+                        if ignore_timed_out and is_timed_out:
+                            logger.debug(f"[ROTATION] Skipping timed out member {member.display_name}")
+                            continue
+                        
+                        # Check online status if prioritizing active members
+                        if prioritize_active:
                             is_offline = (member.status == discord.Status.offline or 
                                         member.status == discord.Status.invisible)
-                            
-                            if not ignore_timed_out:
-                                # Include all members regardless of timeout status
-                                if is_offline:
-                                    offline_members.append(member)
-                                else:
-                                    active_members.append(member)
+                            if is_offline:
+                                offline_members.append(member)
                             else:
-                                # Only include members who aren't timed out
-                                is_timed_out = getattr(member, 'timed_out_until', None) is not None
-                                if not is_timed_out:
-                                    if is_offline:
-                                        offline_members.append(member)
-                                    else:
-                                        active_members.append(member)
-                        except Exception as e:
-                            logger.warning(f"[ROTATION] Error checking member {member.id} status: {e}")
-                            continue
-                else:
-                    if not ignore_timed_out:
-                        # Continue with all eligible members
-                        active_members = []
-                        for member in all_eligible:
-                            try:
-                                if not any(role in member.roles for role in blacklisted_roles):
-                                    active_members.append(member)
-                            except Exception as e:
-                                logger.warning(f"[ROTATION] Error checking member {member.id} blacklisted roles: {e}")
-                                continue
-                    else:
-                        active_members = []
-                        for member in all_eligible:
-                            try:
-                                is_timed_out = getattr(member, 'timed_out_until', None) is not None
-                                if (not is_timed_out and 
-                                    not any(role in member.roles for role in blacklisted_roles)):
-                                    active_members.append(member)
-                            except Exception as e:
-                                logger.warning(f"[ROTATION] Error checking member {member.id} timeout/blacklist: {e}")
-                                continue
-
-                logger.debug(f"[ROTATION] Found {len(all_eligible)} eligible members: "
-                            f"{len(active_members)} active, {len(offline_members)} offline")
-
-                # Shuffle both lists to ensure random selection within each group
+                                active_members.append(member)
+                        else:
+                            active_members.append(member)
+                            
+                    except Exception as e:
+                        logger.warning(f"[ROTATION] Error checking member {member.id} status: {e}")
+                        continue
+                
+                logger.debug(f"[ROTATION] Config {config_id}: {len(active_members)} active members, {len(offline_members)} offline members")
+                
+                # Shuffle the member lists for randomization
                 random.shuffle(active_members)
                 random.shuffle(offline_members)
-
-                # First try to fill with active members, then fall back to offline if needed
+                
+                # Select new spotlight members
                 selected_members = []
-
-                # Add active members first (up to max_users)
                 selected_members.extend(active_members[:max_users])
-
-                # If we still need more members, add from offline
                 remaining_slots = max_users - len(selected_members)
+                
                 if remaining_slots > 0 and offline_members:
                     selected_members.extend(offline_members[:remaining_slots])
-
-                logger.debug(f"[ROTATION] Selected {len(selected_members)} members: "
-                            f"{len(active_members)} active, {len(offline_members)} offline available")
-
-                # Handle role changes based on always_replace_current flag
+                
+                logger.debug(f"[ROTATION] Config {config_id}: Selected {len(selected_members)} members for spotlight")
+                
+                # Track role operations
                 removal_count = 0
                 addition_count = 0
                 role_operation_errors = []
-
+                
+                # Handle role changes based on replacement strategy
                 if always_replace_current:
-                    # Initialize variables
-                    users_to_add = []
-                    users_to_remove = []
-
-                    # Get all eligible users not currently in the spotlight
+                    # Always replace current spotlight members
+                    logger.debug(f"[ROTATION] Config {config_id}: Using always_replace_current strategy")
+                    
+                    # Get eligible replacements (not currently in spotlight)
                     eligible_replacements = []
                     for member in all_eligible:
                         try:
-                            if (member not in current_spotlight and 
-                                (not ignore_timed_out or not getattr(member, 'timed_out_until', None))):
-                                eligible_replacements.append(member)
+                            if member not in current_spotlight:
+                                # Double-check timeout status
+                                is_timed_out = getattr(member, 'timed_out_until', None) is not None
+                                if not ignore_timed_out or not is_timed_out:
+                                    eligible_replacements.append(member)
                         except Exception as e:
                             logger.warning(f"[ROTATION] Error checking member {member.id} for replacement: {e}")
                             continue
-
-                    # If prioritize_active is True, sort by online status (active first)
+                    
+                    # Sort replacements by activity if needed
                     if prioritize_active:
-                        # Split into active and offline users
-                        active_users = []
-                        offline_users = []
+                        active_replacements = []
+                        offline_replacements = []
                         
                         for member in eligible_replacements:
                             try:
                                 is_offline = (member.status == discord.Status.offline or 
                                             member.status == discord.Status.invisible)
                                 if is_offline:
-                                    offline_users.append(member)
+                                    offline_replacements.append(member)
                                 else:
-                                    active_users.append(member)
+                                    active_replacements.append(member)
                             except Exception as e:
                                 logger.warning(f"[ROTATION] Error checking member {member.id} activity: {e}")
                                 continue
-
-                        # Shuffle both groups to maintain randomness within each group
-                        random.shuffle(active_users)
-                        random.shuffle(offline_users)
-
-                        # Combine active users first, then offline users
-                        eligible_replacements = active_users + offline_users
+                        
+                        random.shuffle(active_replacements)
+                        random.shuffle(offline_replacements)
+                        eligible_replacements = active_replacements + offline_replacements
                     else:
-                        # Just shuffle all eligible replacements
                         random.shuffle(eligible_replacements)
-
-                    if current_spotlight:  # Only try to replace if there are current spotlight members
-                        # Determine how many users we can replace
+                    
+                    # Replace current spotlight members
+                    if current_spotlight and eligible_replacements:
                         num_to_replace = min(len(current_spotlight), len(eligible_replacements))
-
+                        
                         if num_to_replace > 0:
-                            # Select users to remove (randomly choose from current spotlight)
                             users_to_remove = random.sample(current_spotlight, num_to_replace)
-
-                            # Select users to add (from eligible replacements)
                             users_to_add = eligible_replacements[:num_to_replace]
-
-                            # Queue role operations for replacements
+                            
+                            # Remove roles from selected current members
                             for member in users_to_remove:
                                 try:
                                     await self.queue_role_operation(member, target_role, False)
                                     removal_count += 1
+                                    logger.debug(f"[ROTATION] Queued removal of {target_role.name} from {member.display_name}")
                                 except Exception as e:
                                     logger.error(f"[ROTATION] Error removing role from {member.display_name}: {e}")
                                     role_operation_errors.append(f"Remove role from {member.display_name}: {e}")
-
+                            
+                            # Add roles to replacement members
                             for member in users_to_add:
                                 try:
                                     await self.queue_role_operation(member, target_role, True)
                                     addition_count += 1
+                                    logger.debug(f"[ROTATION] Queued addition of {target_role.name} to {member.display_name}")
                                 except Exception as e:
                                     logger.error(f"[ROTATION] Error adding role to {member.display_name}: {e}")
                                     role_operation_errors.append(f"Add role to {member.display_name}: {e}")
-
-                            logger.debug(f"[ROTATION] Replaced {num_to_replace} users in the spotlight")
+                            
+                            logger.debug(f"[ROTATION] Config {config_id}: Replaced {num_to_replace} spotlight members")
+                            
+                            # Fill remaining slots if any
+                            current_spotlight_after_replacement = len(current_spotlight) - len(users_to_remove) + len(users_to_add)
+                            remaining_slots = max(0, max_users - current_spotlight_after_replacement)
+                            
+                            if remaining_slots > 0:
+                                available_replacements = [m for m in eligible_replacements if m not in users_to_add]
+                                additional_members = available_replacements[:remaining_slots]
+                                
+                                for member in additional_members:
+                                    try:
+                                        await self.queue_role_operation(member, target_role, True)
+                                        addition_count += 1
+                                        logger.debug(f"[ROTATION] Queued addition of {target_role.name} to {member.display_name} (filling slot)")
+                                    except Exception as e:
+                                        logger.error(f"[ROTATION] Error adding role to {member.display_name}: {e}")
+                                        role_operation_errors.append(f"Add role to {member.display_name}: {e}")
+                                
+                                logger.debug(f"[ROTATION] Config {config_id}: Added {len(additional_members)} additional members")
                         else:
-                            logger.debug("[ROTATION] No eligible replacements found for rotation")
+                            logger.debug(f"[ROTATION] Config {config_id}: No members to replace")
                     else:
-                        logger.debug("[ROTATION] No current spotlight members to replace")
-
-                    # Calculate remaining slots to fill (total slots - current members + additions - removals)
-                    current_spotlight_count = len(current_spotlight)
-                    remaining_slots = max(0, max_users - (current_spotlight_count + addition_count - len(users_to_remove)))
-
-                    # If we have room in the spotlight, fill with additional members
-                    if remaining_slots > 0 and eligible_replacements:
-                        # Get additional members, excluding those already selected to be added
-                        available_replacements = [m for m in eligible_replacements if m not in users_to_add]
-                        additional_members = available_replacements[:remaining_slots]
-
-                        if not additional_members:
-                            logger.debug("[ROTATION] No additional members available to fill remaining slots")
-                        else:
-                            for member in additional_members:
-                                try:
-                                    await self.queue_role_operation(member, target_role, True)
-                                    addition_count += 1
-                                except Exception as e:
-                                    logger.error(f"[ROTATION] Error adding role to {member.display_name}: {e}")
-                                    role_operation_errors.append(f"Add role to {member.display_name}: {e}")
-
-                            logger.debug(
-                                f"[ROTATION] Added {len(additional_members)} additional members to fill remaining slots")
+                        logger.debug(f"[ROTATION] Config {config_id}: No current spotlight members or eligible replacements")
+                
                 else:
-                    # Original behavior - only remove current spotlight members not in new selection
+                    # Standard rotation - remove non-selected, add selected
+                    logger.debug(f"[ROTATION] Config {config_id}: Using standard rotation strategy")
+                    
+                    # Remove role from current spotlight members not in selected list
                     for member in current_spotlight:
                         if member not in selected_members:
                             try:
                                 await self.queue_role_operation(member, target_role, False)
                                 removal_count += 1
+                                logger.debug(f"[ROTATION] Queued removal of {target_role.name} from {member.display_name}")
                             except Exception as e:
                                 logger.error(f"[ROTATION] Error removing role from {member.display_name}: {e}")
                                 role_operation_errors.append(f"Remove role from {member.display_name}: {e}")
-
-                    # Add new spotlight members
+                    
+                    # Add role to selected members who don't have it
                     for member in selected_members:
                         try:
                             if target_role not in member.roles:
                                 await self.queue_role_operation(member, target_role, True)
                                 addition_count += 1
+                                logger.debug(f"[ROTATION] Queued addition of {target_role.name} to {member.display_name}")
                         except Exception as e:
                             logger.error(f"[ROTATION] Error adding role to {member.display_name}: {e}")
                             role_operation_errors.append(f"Add role to {member.display_name}: {e}")
-
-                logger.debug(f"[ROTATION] Queued {removal_count} role removals and {addition_count} role additions")
-
-                # Only update last_rotation if we had no role operation errors
+                
+                logger.info(f"[ROTATION] Config {config_id}: Queued {removal_count} removals and {addition_count} additions")
+                
+                # Update last_rotation only if no role operation errors
                 if not role_operation_errors:
-                    now = datetime.now(timezone.utc)
-                    scheduled_rotation = now  # Default to current time if no last_rotation
-
+                    # Calculate the scheduled rotation time
+                    rotation_time = current_time
+                    
+                    # If we have a previous rotation, calculate the proper next rotation time
                     if last_rotation:
-                        # Parse the last rotation time
-                        last_rotation_dt = datetime.fromisoformat(last_rotation) if isinstance(last_rotation,
-                                                                                            str) else last_rotation
-                        if last_rotation_dt.tzinfo is None:
-                            last_rotation_dt = last_rotation_dt.replace(tzinfo=timezone.utc)
-
-                        # Calculate how much time has passed since last rotation
-                        time_since_last = now - last_rotation_dt
-
-                        # Calculate the exact time the next rotation should have happened
-                        next_rotation = last_rotation_dt
-                        while next_rotation <= now:
-                            next_rotation += timedelta(hours=rotation_interval)
-
-                        # The scheduled rotation is the one that just passed
-                        scheduled_rotation = next_rotation - timedelta(hours=rotation_interval)
-
-                        # If we're more than the rotation interval late, use current time instead of scheduled time
-                        if (now - scheduled_rotation) > timedelta(hours=rotation_interval):
-                            scheduled_rotation = now
-                        # Otherwise, keep the scheduled rotation time (even if slightly late)
-                        else:
-                            # Make sure we don't set a future time (shouldn't happen, but just in case)
-                            scheduled_rotation = min(scheduled_rotation, now)
-
-                    # Update last_rotation to the exact scheduled time
+                        try:
+                            if isinstance(last_rotation, str):
+                                last_rotation_dt = datetime.fromisoformat(last_rotation)
+                            else:
+                                last_rotation_dt = last_rotation
+                            
+                            if last_rotation_dt.tzinfo is None:
+                                last_rotation_dt = last_rotation_dt.replace(tzinfo=timezone.utc)
+                            
+                            # Calculate what the rotation time should be based on the interval
+                            expected_rotation = last_rotation_dt
+                            while expected_rotation <= current_time:
+                                expected_rotation += timedelta(hours=rotation_interval)
+                            
+                            # Use the last valid rotation time (one interval before expected_rotation)
+                            rotation_time = expected_rotation - timedelta(hours=rotation_interval)
+                            
+                            # But don't set it to a future time
+                            if rotation_time > current_time:
+                                rotation_time = current_time
+                                
+                        except Exception as e:
+                            logger.error(f"[ROTATION] Error calculating rotation time for config {config_id}: {e}")
+                            rotation_time = current_time
+                    
+                    # Update the database
+                    logger.debug(f"[ROTATION] Config {config_id}: Updating last_rotation to {rotation_time.isoformat()}")
                     cursor.execute(
                         'UPDATE spotlight SET last_rotation = ? WHERE id = ?',
-                        (scheduled_rotation.isoformat(), config_id)
+                        (rotation_time.isoformat(), config_id)
                     )
-
-                    # Calculate and log when the next rotation will be
-                    next_rotation_time = scheduled_rotation + timedelta(hours=rotation_interval)
-                    logger.info(
-                        f"[ROTATION] Successfully rotated spotlight for guild {guild_id} - "
-                        f"{len(selected_members)} members selected. "
-                        f"Next rotation at {next_rotation_time.isoformat()} "
-                        f"(in {rotation_interval} hours)"
-                    )
-
-                    # Commit the transaction
                     self.db.commit()
-
-                    # Invalidate cache for this guild
+                    
+                    # Clear cache
                     await self.cache.delete(guild_id)
+                    
+                    # Calculate and log next rotation time
+                    next_rotation_time = rotation_time + timedelta(hours=rotation_interval)
+                    logger.info(f"[ROTATION] Successfully completed rotation for config {config_id} (Guild: {guild_id})")
+                    logger.info(f"[ROTATION] Config {config_id}: Next rotation scheduled for {next_rotation_time.isoformat()}")
+                    
                 else:
-                    # Log role operation errors and don't update last_rotation
-                    logger.error(
-                        f"[ROTATION] Role operations failed for config {config_id} (Guild: {guild_id}). "
-                        f"Errors: {'; '.join(role_operation_errors)}. "
-                        f"Not updating last_rotation - will retry on next interval."
-                    )
-
+                    logger.error(f"[ROTATION] Config {config_id}: Role operations failed. Errors: {'; '.join(role_operation_errors)}")
+                    logger.error(f"[ROTATION] Config {config_id}: Not updating last_rotation - will retry on next interval")
+                    
             except Exception as e:
-                # Log the full error with traceback
-                logger.error(f"Error in rotate_spotlight for config {config_id}: {e}", exc_info=True)
-                # Don't update last_rotation on error, so we'll retry next time
+                logger.error(f"[ROTATION] Error processing config {config_id}: {e}", exc_info=True)
                 try:
-                    self.db.rollback()  # Rollback any partial changes
+                    self.db.rollback()
                 except Exception as rollback_error:
-                    logger.error(f"Error rolling back transaction: {rollback_error}")
-
-                # Log additional context about the error
-                logger.error(
-                    f"[ROTATION] Failed to rotate config {config_id} (Guild: {guild_id}). "
-                    f"Last rotation: {last_rotation}. "
-                    f"Will retry on next interval."
-                )
+                    logger.error(f"[ROTATION] Error rolling back transaction for config {config_id}: {rollback_error}")
+                
+                logger.error(f"[ROTATION] Config {config_id}: Failed to complete rotation, will retry on next interval")
+        
+        logger.info(f"[ROTATION] Completed rotation check - processed {len(due_configs)} configurations")
     
     @commands.Cog.listener()
     async def on_presence_update(self, before: discord.Member, after: discord.Member):
@@ -1957,27 +1936,15 @@ class Spotlight(commands.GroupCog, name="spotlight"):
                 eligible_members = [m for m in potential_members
                                     if not ignore_timed_out or not m.timed_out_until]
                                   
-            logger.debug(f"Found {len(eligible_members)} eligible replacement members ({len(active_members)} active, {len(eligible_members) - len(active_members) if prioritize_active else 'all'} non-active)")
-            
             if eligible_members:
                 # Only remove the role if we found a replacement
                 await self.queue_role_operation(after, target_role, False)
-                logger.info(f"Removed {target_role.name} from {after} (ID: {after.id})")
                 
                 # Select a random eligible member
                 replacement = random.choice(eligible_members)
                 await self.queue_role_operation(replacement, target_role, True)
-                logger.info(
-                    f"Assigned spotlight role to {replacement} (ID: {replacement.id}) in guild {after.guild.id} "
-                    f"(Status: {replacement.status}, Timed Out: {bool(replacement.timed_out_until)})"
-                )
             else:
-                logger.info(
-                    f"No eligible replacement found for {after} (ID: {after.id}) in guild {after.guild.id}. "
-                    f"Keeping spotlight role {target_role.name} assigned to {after} until a replacement is available. "
-                    f"(ignore_timed_out={ignore_timed_out}, prioritize_active={prioritize_active}, "
-                    f"blacklisted_roles={[r.name for r in blacklisted_roles]})"
-                )
+                pass
     
     @commands.Cog.listener()
     async def on_guild_role_delete(self, role: discord.Role):
