@@ -22,13 +22,12 @@ class DoorstopCog(commands.GroupCog, name="doorstop"):
         self.db.commit()
 
 
-    @app_commands.command(name="add", description="Add a thread to the doorstop list (max 20 per server).")
+    @app_commands.command(name="add", description="Add a thread to the doorstop list")
     @app_commands.checks.has_permissions(manage_threads=True)
     @app_commands.describe(
         thread="The thread to add to the doorstop list",
     )
     async def add(self, interaction: discord.Interaction, thread: discord.Thread):
-        """Add a thread to the doorstop list (max 20 per server)."""
         try:
             # Get the parent channel
             parent_channel = thread.parent
@@ -38,15 +37,30 @@ class DoorstopCog(commands.GroupCog, name="doorstop"):
             
             cursor = self.db.cursor()
             
+            # Check if this thread is already in the doorstop list
+            cursor.execute('''
+            SELECT thread_id FROM doorstop_threads 
+            WHERE guild_id = ? AND thread_id = ?
+            ''', (interaction.guild.id, thread.id))
+            
+            if cursor.fetchone() is not None:
+                await interaction.response.send_message(
+                    "This thread is already in the doorstop list.",
+                    ephemeral=True
+                )
+                return
+            
             # Check current thread count for this guild
             cursor.execute('''
             SELECT COUNT(*) FROM doorstop_threads WHERE guild_id = ?
             ''', (interaction.guild.id,))
             thread_count = cursor.fetchone()[0]
+
+            max_threads = 10
             
-            if thread_count >= 20:
+            if thread_count >= max_threads:
                 await interaction.response.send_message(
-                    "Maximum of 20 doorstop threads reached for this server. Please remove some before adding more.",
+                    f"Maximum of {max_threads} doorstop threads reached for this server. Please remove some before adding more.",
                     ephemeral=True
                 )
                 return
@@ -58,7 +72,7 @@ class DoorstopCog(commands.GroupCog, name="doorstop"):
             self.db.commit()
             await interaction.response.send_message(
                 f"Thread '{thread.mention}' in {parent_channel.mention} added to the doorstop list. "
-                f"({thread_count + 1}/20 threads used)", 
+                f"({thread_count + 1}/{max_threads} threads used)", 
                 ephemeral=True
             )
         except Exception as e:
