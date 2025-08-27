@@ -120,6 +120,12 @@ class DoorstopCog(commands.GroupCog, name="doorstop"):
         ''', (interaction.guild.id,))
         thread_ids = [row[0] for row in cursor.fetchall()]
         
+        # Check current thread count for this guild
+        cursor.execute('''
+        SELECT COUNT(*) FROM doorstop_threads WHERE guild_id = ?
+        ''', (interaction.guild.id,))
+        thread_count = cursor.fetchone()[0]
+        
         if not thread_ids:
             await interaction.response.send_message("No threads found in the doorstop list.", ephemeral=True)
             return
@@ -146,6 +152,10 @@ class DoorstopCog(commands.GroupCog, name="doorstop"):
             description="Threads that will be automatically reopened if closed:", 
             color=discord.Color.blue()
         )
+        
+        max_threads = 10
+        
+        embed.set_footer(text=f"{thread_count}/{max_threads} threads")
         
         for thread in thread_objects:
             channel_name = f" in {thread.parent.mention}" if thread.parent else ""
