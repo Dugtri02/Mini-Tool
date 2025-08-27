@@ -23,3 +23,4 @@ If you have any questions or concerns about your data, please contact the bot ow
 **Updates:**  
 The bot owner reserves the right to update this Privacy Policy and the Terms of Service at any time without prior notice.  
 _Last updated: 2025-08-27_
+
