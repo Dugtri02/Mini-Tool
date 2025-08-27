@@ -7,6 +7,7 @@ This bot collects and stores certain Discord server (guild) data to provide its 
 - Thread IDs
 - Role IDs
 - Role names
+- User IDs
 - Other information inputted by server staff or users
 
 **Data Retention:**  
@@ -18,3 +19,7 @@ Collected data is used solely for the operation of the bot and is not shared wit
 If you require additional control or privacy, you may self-host the bot. By self-hosting, all data remains under your direct management and is not transmitted to third parties.
 
 If you have any questions or concerns about your data, please contact the bot owner.
+
+**Updates:**  
+The bot owner reserves the right to update this Privacy Policy and the Terms of Service at any time without prior notice.  
+_Last updated: 2025-08-27_

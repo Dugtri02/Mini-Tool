@@ -8,3 +8,7 @@ By using this bot, you acknowledge and agree to the following terms:
 - You use the bot at your own risk.
 
 If you require additional control or assurance, you are welcome to self-host the bot. Instructions and source code are available for those who wish to run the bot independently.
+
+**Updates:**  
+The bot owner reserves the right to update these Terms of Service and the Privacy Policy at any time without prior notice.  
+_Last updated: 2025-08-27_
