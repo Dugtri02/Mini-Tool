@@ -9,52 +9,7 @@ class DoorstopCog(commands.GroupCog, name="doorstop"):
         self._create_tables()
     
     def _create_tables(self):
-        """Create or migrate the necessary database tables for doorstop functionality."""
         cursor = self.db.cursor()
-
-        # Check if the table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='doorstop_threads'")
-        table_exists = cursor.fetchone()
-
-        if table_exists:
-            # Table exists, check schema for migration
-            cursor.execute("PRAGMA table_info(doorstop_threads)")
-            columns_info = cursor.fetchall()
-            # Column info format: (cid, name, type, notnull, dflt_value, pk)
-            
-            pk_columns = sorted([info[1] for info in columns_info if info[5] > 0])
-            
-            # Check if the primary key is the old one (guild_id, channel_id)
-            if pk_columns == ['channel_id', 'guild_id']:
-                print("Old doorstop_threads schema detected. Migrating...")
-                try:
-                    cursor.execute('BEGIN TRANSACTION;')
-                    # 1. Rename the old table
-                    cursor.execute('ALTER TABLE doorstop_threads RENAME TO doorstop_threads_old;')
-                    
-                    # 2. Create the new table with the correct schema
-                    cursor.execute('''
-                    CREATE TABLE doorstop_threads (
-                        guild_id INTEGER NOT NULL,
-                        channel_id INTEGER NOT NULL,
-                        thread_id INTEGER NOT NULL,
-                        PRIMARY KEY (guild_id, thread_id)
-                    )
-                    ''')
-                    
-                    # 3. Copy data from the old table to the new table
-                    cursor.execute('INSERT INTO doorstop_threads (guild_id, channel_id, thread_id) SELECT guild_id, channel_id, thread_id FROM doorstop_threads_old;')
-                    
-                    # 4. Drop the old table
-                    cursor.execute('DROP TABLE doorstop_threads_old;')
-                    
-                    self.db.commit()
-                    print("Migration successful.")
-                except Exception as e:
-                    print(f"Database migration failed: {e}")
-                    self.db.rollback()
-            return # Table is either migrated or already up-to-date
-
         # If table does not exist, create it
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS doorstop_threads (
