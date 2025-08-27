@@ -53,3 +53,5 @@ For support, feedback, or to join the community, visit [Molecord](https://discor
 ## 📦 Setup Instructions
 
 For set-up instructions, [click here](SETUP.md).
+
+test
