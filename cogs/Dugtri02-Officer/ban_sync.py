@@ -158,6 +158,19 @@ class BanSync(commands.GroupCog, name="ban_sync"):
                 continue
 
             try:
+                # Check if the actor has ban permissions in the linked guild
+                try:
+                    actor_member = await linked_guild.fetch_member(actor.id)
+                    if not actor_member.guild_permissions.ban_members:
+                        print(f"Skipping ban in {linked_guild.name}: {actor.name} lacks ban permissions")
+                        continue
+                except discord.NotFound:
+                    print(f"Skipping ban in {linked_guild.name}: {actor.name} not in guild")
+                    continue
+                except discord.HTTPException as e:
+                    print(f"Error checking permissions in {linked_guild.name}: {e}")
+                    continue
+
                 await linked_guild.fetch_ban(user)
                 # User is already banned, do nothing.
             except discord.NotFound:
@@ -210,6 +223,19 @@ class BanSync(commands.GroupCog, name="ban_sync"):
                 continue
 
             try:
+                # Check if the actor has ban permissions in the linked guild
+                try:
+                    actor_member = await linked_guild.fetch_member(actor.id)
+                    if not actor_member.guild_permissions.ban_members:
+                        print(f"Skipping unban in {linked_guild.name}: {actor.name} lacks ban permissions")
+                        continue
+                except discord.NotFound:
+                    print(f"Skipping unban in {linked_guild.name}: {actor.name} not in guild")
+                    continue
+                except discord.HTTPException as e:
+                    print(f"Error checking permissions in {linked_guild.name}: {e}")
+                    continue
+
                 await linked_guild.fetch_ban(user)
                 # User is banned, proceed to unban.
                 try:
