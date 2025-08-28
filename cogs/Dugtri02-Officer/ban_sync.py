@@ -164,7 +164,7 @@ class BanSync(commands.GroupCog, name="ban_sync"):
                 # User is not banned, proceed to ban.
                 try:
                     member = await linked_guild.fetch_member(user.id)
-                    if any([member.guild_permissions.administrator, member.guild_permissions.ban_members, member.guild_permissions.manage_guild]):
+                    if any([member.guild_permissions.administrator, member.guild_permissions.ban_members, member.guild_permissions.manage_guild, member.guild_permissions.kick_members]):
                         print(f"Skipping ban for {user.name} in {linked_guild.name} due to protected permissions.")
                         continue
                 except discord.NotFound:
