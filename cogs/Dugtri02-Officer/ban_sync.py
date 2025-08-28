@@ -252,5 +252,18 @@ class BanSync(commands.GroupCog, name="ban_sync"):
             except discord.HTTPException as e:
                 print(f"Failed to check ban status for {user.id} in {linked_guild.name}: {e}")
 
+    @commands.Cog.listener()
+    async def on_command_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        if isinstance(error, app_commands.CheckFailure):
+            await interaction.response.send_message(
+                "❌ You don't have permission to use this command. You need to be an administrator or the server owner.",
+                ephemeral=True
+            )
+        else:
+            # Re-raise the error if it's not a CheckFailure
+            raise error
+
 async def setup(bot: commands.Bot):
-    await bot.add_cog(BanSync(bot))
+    cog = BanSync(bot)
+    bot.tree.on_error = cog.on_command_error  # Register the error handler
+    await bot.add_cog(cog)
