@@ -80,7 +80,8 @@ class BanSync(commands.GroupCog, name="ban_sync"):
         self.db.commit()
 
         if deleted_rows > 0:
-            target_guild_name = self.bot.get_guild(target_guild_id).name or guild_id
+            target_guild = self.bot.get_guild(target_guild_id)
+            target_guild_name = target_guild.name if target_guild else guild_id
             await interaction.followup.send(f"✅ Successfully unlinked from guild `{target_guild_name}`.", ephemeral=True)
         else:
             await interaction.followup.send("❌ These guilds are not linked.", ephemeral=True)
