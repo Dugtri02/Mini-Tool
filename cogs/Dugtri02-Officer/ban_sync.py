@@ -135,14 +135,19 @@ class BanSync(commands.GroupCog, name="ban_sync"):
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
+        actor = None
         reason = "No reason provided"
         try:
             async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
                 if entry.target.id == user.id:
+                    actor = entry.user
                     reason = entry.reason or "No reason provided"
                     break
         except discord.Forbidden:
             print(f"Missing Audit Log permissions in {guild.name} to fetch ban reason.")
+
+        if actor and actor.id == self.bot.user.id:
+            return
 
         linked_guilds = await self._get_linked_guilds(guild.id)
         sync_reason = f"{guild.name}: {reason}"
@@ -182,14 +187,19 @@ class BanSync(commands.GroupCog, name="ban_sync"):
 
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User):
+        actor = None
         reason = "No reason provided"
         try:
             async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.unban):
                 if entry.target.id == user.id:
+                    actor = entry.user
                     reason = entry.reason or "No reason provided"
                     break
         except discord.Forbidden:
             print(f"Missing Audit Log permissions in {guild.name} to fetch unban reason.")
+
+        if actor and actor.id == self.bot.user.id:
+            return
 
         linked_guilds = await self._get_linked_guilds(guild.id)
         sync_reason = f"{guild.name}: {reason}"
