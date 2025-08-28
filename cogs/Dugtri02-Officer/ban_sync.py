@@ -40,9 +40,9 @@ class BanSync(commands.GroupCog, name="ban_sync"):
             await interaction.followup.send("❌ I am not a member of the target guild.", ephemeral=True)
             return
 
-        if target_guild.owner_id != interaction.user.id:
-            await interaction.followup.send("❌ You must be the owner of both guilds to link them.", ephemeral=True)
-            return
+        # if target_guild.owner_id != interaction.user.id:
+        #     await interaction.followup.send("❌ You must be the owner of both guilds to link them.", ephemeral=True)
+        #     return
 
         guild_one = min(interaction.guild.id, target_guild.id)
         guild_two = max(interaction.guild.id, target_guild.id)
