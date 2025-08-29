@@ -658,6 +658,17 @@ class BanSync(commands.GroupCog, name="sync"):
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
+        """Handle when a member is banned in any guild."""
+        # Check if the ban was performed by the bot itself
+        if user.id == self.bot.user.id:
+            return
+            
+        # Check if this is our own ban (to prevent ban chains)
+        # Format: {guild_id: {'user_id': user_id, 'source_guild_id': source_guild_id}}
+        ban_key = f"{guild.id}_{user.id}"
+        if hasattr(self, '_processing_ban') and ban_key in self._processing_ban:
+            return
+
         actor = None
         reason = "No reason provided"
         
@@ -698,37 +709,54 @@ class BanSync(commands.GroupCog, name="sync"):
             try:
                 # Check if the actor has ban permissions and proper role hierarchy in the linked guild
                 try:
+                    if actor is None:
+                        # If we couldn't determine the actor, send an alert and skip
+                        await self._send_ban_alert(
+                            linked_guild,
+                            guild,
+                            None,  # No actor
+                            user,
+                            reason,
+                            "Could not determine who performed the ban (missing audit log entry)"
+                        )
+                        continue
+
                     actor_member = await linked_guild.fetch_member(actor.id)
-                    
+
                     # Check if actor has ban permissions
                     if not actor_member.guild_permissions.ban_members:
                         await self._send_ban_alert(linked_guild, guild, actor, user, reason, "Missing Ban Permissions")
                         continue
-                        
+
                     # Check if banned user is a bot or has higher role
                     try:
                         banned_member = await linked_guild.fetch_member(user.id)
-                        alert_reason = None
-                        
+
                         if banned_member.bot:
-                            alert_reason = f"Cannot ban `{user.name}` - They are a bot account"
-                        elif banned_member.top_role >= actor_member.top_role:
-                            alert_reason = f"Cannot ban `{user.name}` - They have a higher or equal role"
-                            
-                        if alert_reason:
                             await self._send_ban_alert(
-                                linked_guild, 
-                                guild, 
-                                actor, 
-                                user, 
-                                reason, 
-                                alert_reason
+                                linked_guild,
+                                guild,
+                                actor,
+                                user,
+                                reason,
+                                f"Cannot ban `{user.name}` - They are a bot account"
+                            )
+                            continue
+
+                        # Check role hierarchy
+                        if banned_member.top_role >= actor_member.top_role:
+                            await self._send_ban_alert(
+                                linked_guild,
+                                guild,
+                                actor,
+                                user,
+                                reason,
+                                f"Cannot ban `{user.name}` - They have a higher or equal role"
                             )
                             continue
                     except discord.NotFound:
                         # User not in guild, can proceed with ban
                         pass
-                        
                 except discord.NotFound:
                     # Actor is not in the linked guild, send alert
                     await self._send_ban_alert(linked_guild, guild, actor, user, reason, "Actor not in guild")
@@ -748,12 +776,21 @@ class BanSync(commands.GroupCog, name="sync"):
                 except discord.NotFound:
                     # Member not in guild, can be banned.
                     pass
-                except discord.HTTPException as e:
-                    print(f"Failed to fetch member {user.id} from {linked_guild.name}: {e}")
-                    continue
-
+                    
+                # Set flag to prevent ban chains with source guild context
+                if not hasattr(self, '_processing_ban'):
+                    self._processing_ban = {}
+                # Store both the target user and source guild to prevent cross-banning
+                ban_key = f"{linked_guild.id}_{user.id}"
+                self._processing_ban[ban_key] = {'user_id': user.id, 'source_guild_id': guild.id}
                 try:
                     await linked_guild.ban(user, reason=sync_reason)
+                    
+                    # Clear the processing flag after a short delay
+                    await asyncio.sleep(5)  # Small delay to ensure the ban event is processed
+                    if hasattr(self, '_processing_ban'):
+                        ban_key = f"{linked_guild.id}_{user.id}"
+                        self._processing_ban.pop(ban_key, None)
                 except discord.Forbidden:
                     print(f"Failed to sync ban for {user.id} to {linked_guild.name}: Missing Permissions")
                 except discord.HTTPException as e:
