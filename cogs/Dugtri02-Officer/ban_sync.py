@@ -221,12 +221,10 @@ class BanSync(commands.GroupCog, name="ban_sync"):
                     if not actor_member.guild_permissions.ban_members:
                         # Instead of skipping, send an alert to the ban alert channel
                         await self._send_ban_alert(linked_guild, guild, actor, user, reason)
-                        print(f"Sent ban alert in {linked_guild.name}: {actor.name} lacks ban permissions")
                         continue
                 except discord.NotFound:
                     # Actor is not in the linked guild, send alert
                     await self._send_ban_alert(linked_guild, guild, actor, user, reason)
-                    print(f"Sent ban alert in {linked_guild.name}: {actor.name} not in guild")
                     continue
                 except discord.HTTPException as e:
                     print(f"Error checking permissions in {linked_guild.name}: {e}")
@@ -239,7 +237,6 @@ class BanSync(commands.GroupCog, name="ban_sync"):
                 try:
                     member = await linked_guild.fetch_member(user.id)
                     if any([member.guild_permissions.administrator, member.guild_permissions.ban_members, member.guild_permissions.manage_guild, member.guild_permissions.kick_members]):
-                        print(f"Skipping ban for {user.name} in {linked_guild.name} due to protected permissions.")
                         continue
                 except discord.NotFound:
                     # Member not in guild, can be banned.
@@ -270,7 +267,7 @@ class BanSync(commands.GroupCog, name="ban_sync"):
                     reason = entry.reason or "No reason provided"
                     break
         except discord.Forbidden:
-            print(f"Missing Audit Log permissions in {guild.name} to fetch unban reason.")
+            pass
 
         if actor and actor.id == self.bot.user.id:
             return
@@ -288,10 +285,8 @@ class BanSync(commands.GroupCog, name="ban_sync"):
                 try:
                     actor_member = await linked_guild.fetch_member(actor.id)
                     if not actor_member.guild_permissions.ban_members:
-                        print(f"Skipping unban in {linked_guild.name}: {actor.name} lacks ban permissions")
                         continue
                 except discord.NotFound:
-                    print(f"Skipping unban in {linked_guild.name}: {actor.name} not in guild")
                     continue
                 except discord.HTTPException as e:
                     print(f"Error checking permissions in {linked_guild.name}: {e}")
@@ -322,12 +317,10 @@ class BanSync(commands.GroupCog, name="ban_sync"):
         result = cursor.fetchone()
         
         if not result or not result[0]:
-            print(f"No ban alert channel configured for {target_guild.name}")
             return
             
         channel = target_guild.get_channel(result[0])
         if not channel:
-            print(f"Configured ban alert channel not found in {target_guild.name}")
             return
             
         embed = discord.Embed(
