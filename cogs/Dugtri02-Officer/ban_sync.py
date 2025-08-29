@@ -333,7 +333,7 @@ class BanSync(commands.GroupCog, name="ban_sync"):
         embed = discord.Embed(
             title="⚠️ Ban Sync Alert",
             description=(
-                f"A user was banned in **{source_guild.name}** by a non-moderator of this server.\n\n"
+                f"> User banned in `{source_guild.name}` by a non-mod of this guild.\n\n"
                 f"**User:** {user.mention} (`{user.id}`)\n"
                 f"**Banned by:** {actor.mention} (`{actor.id}`)\n"
                 f"**Reason:** {reason or 'No reason provided'}"
