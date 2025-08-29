@@ -2,6 +2,8 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Button
+from typing import Optional
+import datetime
 
 class BanSync(commands.GroupCog, name="sink"):
     def __init__(self, bot: commands.Bot):
@@ -194,20 +196,35 @@ class BanSync(commands.GroupCog, name="sink"):
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
         actor = None
         reason = "No reason provided"
+        
+        # Try to find the ban entry in audit logs
         try:
-            async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
+            # Look for ban entries in the last 10 seconds
+            async for entry in guild.audit_logs(
+                limit=5,  # Check last 5 entries to be safe
+                action=discord.AuditLogAction.ban,
+                after=discord.utils.utcnow() - datetime.timedelta(seconds=10)
+            ):
                 if entry.target.id == user.id:
                     actor = entry.user
                     reason = entry.reason or "No reason provided"
                     break
         except discord.Forbidden:
             print(f"Missing Audit Log permissions in {guild.name} to fetch ban reason.")
+        except Exception as e:
+            print(f"Error fetching audit logs in {guild.name}: {e}")
 
-        if actor and actor.id == self.bot.user.id:
-            return
+        if actor is None:
+            print(f"Could not find ban entry in audit logs for {user} in {guild.name}")
+            actor_name = "[Unknown User]"
+            actor_id = "[Unknown]"
+            sync_reason = f"User banned in {guild.name}. Reason: {reason}"
+        else:
+            actor_name = actor.name
+            actor_id = actor.id
+            sync_reason = f"{actor_name} ({actor_id}) in {guild.name} banned for reason: {reason}"
 
         linked_guilds = await self._get_linked_guilds(guild.id)
-        sync_reason = f"{actor.name} ({actor.id}) in {guild.name} banned for reason: {reason}"
 
         for linked_guild_id in linked_guilds:
             linked_guild = self.bot.get_guild(linked_guild_id)
@@ -215,16 +232,42 @@ class BanSync(commands.GroupCog, name="sink"):
                 continue
 
             try:
-                # Check if the actor has ban permissions in the linked guild
+                # Check if the actor has ban permissions and proper role hierarchy in the linked guild
                 try:
                     actor_member = await linked_guild.fetch_member(actor.id)
+                    
+                    # Check if actor has ban permissions
                     if not actor_member.guild_permissions.ban_members:
-                        # Instead of skipping, send an alert to the ban alert channel
-                        await self._send_ban_alert(linked_guild, guild, actor, user, reason)
+                        await self._send_ban_alert(linked_guild, guild, actor, user, reason, "Missing Ban Permissions")
                         continue
+                        
+                    # Check if banned user is a bot or has higher role
+                    try:
+                        banned_member = await linked_guild.fetch_member(user.id)
+                        alert_reason = None
+                        
+                        if banned_member.bot:
+                            alert_reason = f"Cannot ban `{user.name}` - They are a bot account"
+                        elif banned_member.top_role >= actor_member.top_role:
+                            alert_reason = f"Cannot ban `{user.name}` - They have a higher or equal role"
+                            
+                        if alert_reason:
+                            await self._send_ban_alert(
+                                linked_guild, 
+                                guild, 
+                                actor, 
+                                user, 
+                                reason, 
+                                alert_reason
+                            )
+                            continue
+                    except discord.NotFound:
+                        # User not in guild, can proceed with ban
+                        pass
+                        
                 except discord.NotFound:
                     # Actor is not in the linked guild, send alert
-                    await self._send_ban_alert(linked_guild, guild, actor, user, reason)
+                    await self._send_ban_alert(linked_guild, guild, actor, user, reason, "Actor not in guild")
                     continue
                 except discord.HTTPException as e:
                     print(f"Error checking permissions in {linked_guild.name}: {e}")
@@ -310,8 +353,18 @@ class BanSync(commands.GroupCog, name="sink"):
 
     @commands.Cog.listener()
     async def _send_ban_alert(self, target_guild: discord.Guild, source_guild: discord.Guild, 
-                            actor: discord.Member, user: discord.User, reason: str):
-        """Send a ban alert to the configured ban alert channel."""
+                            actor: discord.Member, user: discord.User, reason: str, 
+                            alert_reason: str = "No reason provided"):
+        """Send a ban alert to the configured ban alert channel.
+        
+        Args:
+            target_guild: The guild where the alert should be sent
+            source_guild: The guild where the ban originated
+            actor: The member who performed the ban
+            user: The user who was banned
+            reason: The reason for the ban
+            alert_reason: The reason for the alert (why the ban couldn't be auto-synced)
+        """
         cursor = self.db.cursor()
         cursor.execute("SELECT ban_alert_channel FROM ban_sync_settings WHERE guild_id = ?", (target_guild.id,))
         result = cursor.fetchone()
@@ -326,7 +379,8 @@ class BanSync(commands.GroupCog, name="sink"):
         embed = discord.Embed(
             title="⚠️ Ban Sync Alert",
             description=(
-                f"> User banned in `{source_guild.name}` by a non-mod of this guild.\n\n"
+                f"> User banned in `{source_guild.name}`.\n"
+                f"> {alert_reason}\n\n"
                 f"**User:** {user.mention} (`{user.id}`)\n"
                 f"**Banned by:** {actor.mention} (`{actor.id}`)\n"
                 f"**Reason:** {reason or 'No reason provided'}"
@@ -334,7 +388,6 @@ class BanSync(commands.GroupCog, name="sink"):
             color=discord.Color.orange()
         )
         embed.set_thumbnail(url=user.display_avatar.url)
-        embed.set_footer(text=f"User ID: {user.id}")
         
         view = View(timeout=None)
         view.add_item(self.BanButton(user.id, target_guild.id))
