@@ -572,16 +572,6 @@ class BanSync(commands.GroupCog, name="sink"):
     async def _send_ban_alert(self, target_guild: discord.Guild, source_guild: discord.Guild, 
                             actor: discord.Member, user: discord.User, reason: str, 
                             alert_reason: str = "No reason provided"):
-        """Send a ban alert to the configured ban alert channel.
-        
-        Args:
-            target_guild: The guild where the alert should be sent
-            source_guild: The guild where the ban originated
-            actor: The member who performed the ban
-            user: The user who was banned
-            reason: The reason for the ban
-            alert_reason: The reason for the alert (why the ban couldn't be auto-synced)
-        """
         cursor = self.db.cursor()
         cursor.execute("SELECT ban_alert_channel FROM ban_sync_settings WHERE guild_id = ?", (target_guild.id,))
         result = cursor.fetchone()
