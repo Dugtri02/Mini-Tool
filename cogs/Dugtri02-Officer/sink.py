@@ -23,18 +23,37 @@ class BanSync(commands.GroupCog, name="sink"):
                 return
 
             guild = interaction.guild
-            user = await interaction.client.fetch_user(self.user_id)
+            try:
+                target_user = await interaction.client.fetch_user(self.user_id)
+                target_member = await guild.fetch_member(target_user.id)
+                
+                # Check role hierarchy
+                if target_member.top_role >= interaction.user.top_role:
+                    await interaction.response.send_message(
+                        f"❌ You can't ban {target_user.mention} because they have a higher or equal role than you.",
+                        ephemeral=True
+                    )
+                    return
+                    
+            except discord.NotFound:
+                # User not in guild, can proceed with ban
+                pass
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Error checking user permissions: {str(e)}", ephemeral=True)
+                return
             
             try:
-                await guild.ban(user, reason=f"Banned via ban sync alert (by {interaction.user})")
-                await interaction.response.send_message(f"✅ Successfully banned {user.mention}.", ephemeral=True)
+                await guild.ban(target_user, reason=f"Banned via ban sync alert (by {interaction.user})")
+                await interaction.response.send_message(f"✅ Successfully banned {target_user.mention}.", ephemeral=True)
                 
                 # Update the embed to show the ban was completed
                 embed = interaction.message.embeds[0]
                 embed.color = discord.Color.green()
                 embed.set_footer(text=f"Banned by {interaction.user}")
                 await interaction.message.edit(embed=embed, view=None)
-            except Exception as e:
+            except discord.Forbidden:
+                await interaction.response.send_message("❌ I don't have permission to ban users in this server.", ephemeral=True)
+            except discord.HTTPException as e:
                 await interaction.response.send_message(f"❌ Failed to ban user: {str(e)}", ephemeral=True)
 
     def _create_tables(self):
@@ -355,16 +374,6 @@ class BanSync(commands.GroupCog, name="sink"):
     async def _send_ban_alert(self, target_guild: discord.Guild, source_guild: discord.Guild, 
                             actor: discord.Member, user: discord.User, reason: str, 
                             alert_reason: str = "No reason provided"):
-        """Send a ban alert to the configured ban alert channel.
-        
-        Args:
-            target_guild: The guild where the alert should be sent
-            source_guild: The guild where the ban originated
-            actor: The member who performed the ban
-            user: The user who was banned
-            reason: The reason for the ban
-            alert_reason: The reason for the alert (why the ban couldn't be auto-synced)
-        """
         cursor = self.db.cursor()
         cursor.execute("SELECT ban_alert_channel FROM ban_sync_settings WHERE guild_id = ?", (target_guild.id,))
         result = cursor.fetchone()
