@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -76,6 +77,120 @@ class BanSync(commands.GroupCog, name="sink"):
             
         self.db.commit()
 
+    async def _get_alert_channel(self, guild_id: int) -> Optional[discord.TextChannel]:
+        """Get the alert channel for a guild if it exists."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT ban_alert_channel FROM ban_sync_settings WHERE guild_id = ?", (guild_id,))
+        result = cursor.fetchone()
+        if result and result[0]:
+            channel = self.bot.get_channel(result[0])
+            if channel and isinstance(channel, discord.TextChannel):
+                return channel
+        return None
+
+    class GuildLinkRequestView(View):
+        def __init__(self, source_guild: discord.Guild, target_guild: discord.Guild, db, requester: discord.Member, original_message: discord.Message = None):
+            super().__init__(timeout=86400)  # 24 hours timeout
+            self.source_guild = source_guild
+            self.target_guild = target_guild
+            self.db = db
+            self.requester = requester
+            self.original_message = original_message
+            self.approved = asyncio.Event()
+            self.decision = None  # 'accepted' or 'rejected'
+            self.decided_by = None
+
+        async def update_original_message(self, interaction: discord.Interaction = None):
+            if not self.original_message:
+                return
+                
+            if self.decision == 'accepted':
+                embed = discord.Embed(
+                    title="✅ Guild Link Request Approved",
+                    description=f"**{self.source_guild.name}** is now linked to this server for ban synchronization.",
+                    color=discord.Color.green()
+                )
+                embed.set_footer(text=f"Approved by {self.decided_by}")
+            else:  # rejected
+                embed = discord.Embed(
+                    title="❌ Guild Link Request Rejected",
+                    description=f"The request to link with **{self.source_guild.name}** has been rejected.",
+                    color=discord.Color.red()
+                )
+                embed.set_footer(text=f"Rejected by {self.decided_by}")
+            
+            try:
+                if interaction and not interaction.response.is_done():
+                    await interaction.response.edit_message(embed=embed, view=None)
+                else:
+                    await self.original_message.edit(embed=embed, view=None)
+            except Exception as e:
+                print(f"Error updating original message: {e}")
+
+        async def notify_requester(self, interaction: discord.Interaction, approved: bool):
+            try:
+                # Try to send DM to the requester
+                try:
+                    if approved:
+                        embed = discord.Embed(
+                            title="✅ Guild Link Request Approved",
+                            description=f"Your request to link with **{self.target_guild.name}** has been approved!",
+                            color=discord.Color.green()
+                        )
+                    else:
+                        embed = discord.Embed(
+                            title="❌ Guild Link Request Rejected",
+                            description=f"Your request to link with **{self.target_guild.name}** has been rejected.",
+                            color=discord.Color.red()
+                        )
+                    
+                    embed.set_footer(text=f"Decided by {interaction.user}")
+                    await self.requester.send(embed=embed)
+                except discord.Forbidden:
+                    # If DM fails, try to send to the source guild's alert channel
+                    alert_channel = await self._get_alert_channel(self.source_guild.id)
+                    if alert_channel:
+                        if approved:
+                            message = f"✅ Your request to link with **{self.target_guild.name}** has been approved!"
+                        else:
+                            message = f"❌ Your request to link with **{self.target_guild.name}** has been rejected."
+                        
+                        try:
+                            await alert_channel.send(f"{self.requester.mention} {message} (Decided by {interaction.user})")
+                        except:
+                            pass
+            except Exception as e:
+                print(f"Error notifying requester: {e}")
+
+        @discord.ui.button(label="Accept", style=discord.ButtonStyle.green)
+        async def accept(self, interaction: discord.Interaction, button: Button):
+            if not interaction.user.guild_permissions.administrator and interaction.user.id != interaction.guild.owner_id:
+                await interaction.response.send_message("❌ You don't have permission to approve this request.", ephemeral=True)
+                return
+
+            await interaction.response.defer()
+            self.decision = 'accepted'
+            self.decided_by = str(interaction.user)
+            await self.update_original_message(interaction)
+            await self.notify_requester(interaction, approved=True)
+            self.approved.set()
+            await interaction.followup.send("✅ Guild link request approved!", ephemeral=True)
+            self.stop()
+
+        @discord.ui.button(label="Reject", style=discord.ButtonStyle.red)
+        async def reject(self, interaction: discord.Interaction, button: Button):
+            if not interaction.user.guild_permissions.administrator and interaction.user.id != interaction.guild.owner_id:
+                await interaction.response.send_message("❌ You don't have permission to reject this request.", ephemeral=True)
+                return
+
+            await interaction.response.defer()
+            self.decision = 'rejected'
+            self.decided_by = str(interaction.user)
+            await self.update_original_message(interaction)
+            await self.notify_requester(interaction, approved=False)
+            await interaction.followup.send("❌ Guild link request rejected.", ephemeral=True)
+            self.stop()
+
     @app_commands.command(name="add", description="Link another guild for ban synchronization.")
     @app_commands.describe(guild_id="The ID of the guild to link.")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
@@ -97,10 +212,6 @@ class BanSync(commands.GroupCog, name="sink"):
             await interaction.followup.send("❌ I am not a member of the target guild.", ephemeral=True)
             return
 
-        # if target_guild.owner_id != interaction.user.id:
-        #     await interaction.followup.send("❌ You must be the owner of both guilds to link them.", ephemeral=True)
-        #     return
-
         guild_one = min(interaction.guild.id, target_guild.id)
         guild_two = max(interaction.guild.id, target_guild.id)
 
@@ -110,10 +221,97 @@ class BanSync(commands.GroupCog, name="sink"):
             await interaction.followup.send("✅ These guilds are already linked.", ephemeral=True)
             return
 
-        cursor.execute("INSERT INTO ban_sync_links (guild_one_id, guild_two_id) VALUES (?, ?)", (guild_one, guild_two))
-        self.db.commit()
+        # Check if user has admin in target guild
+        target_member = target_guild.get_member(interaction.user.id)
+        has_admin_in_target = (target_member and 
+                             (target_member.guild_permissions.administrator or 
+                              target_member.id == target_guild.owner_id))
 
-        await interaction.followup.send(f"✅ Successfully linked with guild `{target_guild.name}`.", ephemeral=True)
+        if has_admin_in_target:
+            # If user has admin in target guild, link directly
+            cursor.execute("INSERT INTO ban_sync_links (guild_one_id, guild_two_id) VALUES (?, ?)", (guild_one, guild_two))
+            self.db.commit()
+            await interaction.followup.send(f"✅ Successfully linked with guild `{target_guild.name}`.", ephemeral=True)
+        else:
+            # If no admin in target guild, send a request to the target guild's alert channel
+            alert_channel = await self._get_alert_channel(target_guild_id)
+            if not alert_channel:
+                await interaction.followup.send(
+                    f"❌ You don't have administrator permissions in `{target_guild.name}` and they don't have an alert channel set up. "
+                    "Please ask an administrator of that server to set up an alert channel using `/sink set_alert_channel`.",
+                    ephemeral=True
+                )
+                return
+
+            # Create and send the request
+            embed = discord.Embed(
+                title="🔗 Guild Link Request",
+                description=(
+                    f"**{interaction.guild.name}** wants to link with this server for ban synchronization.\n\n"
+                    "⚠️ **This will allow them to sync bans to this server.**\n"
+                    "Administrators of this server can accept or reject this request."
+                ),
+                color=discord.Color.orange()
+            )
+            embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
+            embed.add_field(name="Requested by", value=f"{interaction.user.mention} (`{interaction.user.id}`)")
+            
+            try:
+                # Create the view and store the message reference
+                view = self.GuildLinkRequestView(
+                    source_guild=interaction.guild,
+                    target_guild=target_guild,
+                    db=self.db,
+                    requester=interaction.user
+                )
+                
+                # Send the message and store the message reference in the view
+                message = await alert_channel.send(embed=embed, view=view)
+                view.original_message = message
+                await interaction.followup.send(
+                    f"📨 Sent a link request to `{target_guild.name}`. "
+                    f"An administrator there needs to approve the request in {alert_channel.mention}.",
+                    ephemeral=True
+                )
+                
+                # Wait for the request to be approved or timeout
+                try:
+                    await asyncio.wait_for(view.approved.wait(), timeout=86400)  # 24 hours
+                    
+                    # If we get here, the request was approved
+                    cursor.execute("INSERT INTO ban_sync_links (guild_one_id, guild_two_id) VALUES (?, ?)", (guild_one, guild_two))
+                    self.db.commit()
+                    
+                    # Update the request message
+                    embed.color = discord.Color.green()
+                    embed.title = "✅ Guild Link Approved"
+                    embed.description = f"**{interaction.guild.name}** is now linked to this server for ban synchronization."
+                    await message.edit(embed=embed, view=None)
+                    
+                    # Notify the requester
+                    await interaction.followup.send(
+                        f"✅ Your request to link with `{target_guild.name}` has been approved! "
+                        f"The guilds are now linked for ban synchronization.",
+                        ephemeral=True
+                    )
+                    
+                except asyncio.TimeoutError:
+                    # Request timed out
+                    embed.color = discord.Color.dark_grey()
+                    embed.title = "⌛ Guild Link Request Expired"
+                    await message.edit(embed=embed, view=None)
+                    
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    f"❌ I don't have permission to send messages in the alert channel of `{target_guild.name}`. "
+                    "Please ask an administrator of that server to check my permissions.",
+                    ephemeral=True
+                )
+            except Exception as e:
+                await interaction.followup.send(
+                    f"❌ An error occurred while sending the link request: {str(e)}",
+                    ephemeral=True
+                )
 
     @app_commands.command(name="remove", description="Unlink a guild from ban synchronization.")
     @app_commands.describe(guild_id="The ID of the guild to unlink.")
@@ -374,6 +572,16 @@ class BanSync(commands.GroupCog, name="sink"):
     async def _send_ban_alert(self, target_guild: discord.Guild, source_guild: discord.Guild, 
                             actor: discord.Member, user: discord.User, reason: str, 
                             alert_reason: str = "No reason provided"):
+        """Send a ban alert to the configured ban alert channel.
+        
+        Args:
+            target_guild: The guild where the alert should be sent
+            source_guild: The guild where the ban originated
+            actor: The member who performed the ban
+            user: The user who was banned
+            reason: The reason for the ban
+            alert_reason: The reason for the alert (why the ban couldn't be auto-synced)
+        """
         cursor = self.db.cursor()
         cursor.execute("SELECT ban_alert_channel FROM ban_sync_settings WHERE guild_id = ?", (target_guild.id,))
         result = cursor.fetchone()
