@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Button
 
-class BanSync(commands.GroupCog, name="ban_sync"):
+class BanSync(commands.GroupCog, name="sink"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db = bot.db
