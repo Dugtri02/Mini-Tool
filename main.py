@@ -1,5 +1,5 @@
-import discord, os, asyncio, logging, sqlite3, getpass
-from discord.ext import commands
+import discord, os, asyncio, logging, sqlite3, getpass, random
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 load_dotenv(); TOKEN = os.getenv('TOKEN')
 
@@ -10,7 +10,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
-intents = discord.Intents.all(); bot = commands.Bot(command_prefix="!", intents=intents); bot.remove_command('help')
+intents = discord.Intents.default()
+# intents.members = True # Uncomment if the cogs you use require seeing members and their info
+# intents.message_content = True # Uncomment if the cogs you use require seeing messages and their contents
+# intents.presences = True # Uncomment if the cogs you use require seeing presences
+
+bot = commands.Bot(command_prefix="!", intents=intents); bot.remove_command('help') # Remove the default help command so we can make our own
 
 def setup_database():
     conn = sqlite3.connect('.db', check_same_thread=False)
@@ -35,6 +40,29 @@ async def on_ready():
                 except Exception as e:
                     logger.error(f'Failed to load cog {filename[:-3]}: {e}')
     await bot.tree.sync()
+
+    # Start the status change loop
+    change_status.start()
+
+@tasks.loop(hours=1, reconnect=True)
+async def change_status():
+    server_count = len(bot.guilds)
+    
+    possible_statuses = [ # Invite link goes to the Mini-Tool support server
+        f"Watchin' {server_count} Guilds",
+        f"https://discord.gg/Dt8jxXsXwe"#,
+        #f"example status 1",
+        #f"example status 2, always add a comma after the last status quote"
+    ]
+    
+    # Choose a random status from the list
+    chosen_status = random.choice(possible_statuses)
+    
+    # Create the custom activity
+    act = discord.CustomActivity(name=chosen_status)
+    
+    # Set the presence
+    await bot.change_presence(status=discord.Status.idle, activity=act)
 
 @bot.event
 async def on_guild_remove(guild):
@@ -139,4 +167,5 @@ if __name__ == '__main__':
         else:
             with open('.env', 'w') as f:
                 f.write(f'TOKEN = \'{TOKEN}\'\n')
+
     bot.run(TOKEN)

@@ -6,7 +6,7 @@ from discord.ui import View, Button
 from typing import Optional
 import datetime
 
-class BanSync(commands.GroupCog, name="sink"):
+class BanSync(commands.GroupCog, name="sync"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db = bot.db
@@ -277,7 +277,7 @@ class BanSync(commands.GroupCog, name="sink"):
             )
             self.stop()
 
-    @app_commands.command(name="add", description="Link another guild for ban synchronization.")
+    @app_commands.command(name="link_add", description="Link another guild for ban synchronization.")
     @app_commands.describe(guild_id="The ID of the guild to link.")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
     async def add_link(self, interaction: discord.Interaction, guild_id: str):
@@ -429,7 +429,7 @@ class BanSync(commands.GroupCog, name="sink"):
                     ephemeral=True
                 )
 
-    @app_commands.command(name="remove", description="Unlink a guild from ban synchronization.")
+    @app_commands.command(name="link_remove", description="Unlink a guild from ban synchronization.")
     @app_commands.describe(guild_id="The ID of the guild to unlink.")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
     async def remove_link(self, interaction: discord.Interaction, guild_id: str):
@@ -457,7 +457,7 @@ class BanSync(commands.GroupCog, name="sink"):
         else:
             await interaction.followup.send("❌ These guilds are not linked.", ephemeral=True)
 
-    @app_commands.command(name="set_alert_channel", description="Set the channel where ban alerts will be sent.")
+    @app_commands.command(name="alerts_set", description="Set the channel where ban alerts will be sent.")
     @app_commands.describe(channel="The channel to send ban alerts to")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
     async def set_alert_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
@@ -470,7 +470,7 @@ class BanSync(commands.GroupCog, name="sink"):
         self.db.commit()
         await interaction.response.send_message(f"✅ Ban alerts will now be sent to {channel.mention}.", ephemeral=True)
     
-    @app_commands.command(name="remove_alert_channel", description="Remove the channel where ban alerts will be sent.")
+    @app_commands.command(name="alerts_remove", description="Remove the channel where ban alerts will be sent.")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
     async def remove_alert_channel(self, interaction: discord.Interaction):
         cursor = self.db.cursor()
@@ -577,7 +577,7 @@ class BanSync(commands.GroupCog, name="sink"):
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="list", description="List all guilds linked for ban synchronization.")
+    @app_commands.command(name="link_list", description="List all guilds linked for ban synchronization.")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
     async def list_links(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -787,6 +787,16 @@ class BanSync(commands.GroupCog, name="sink"):
     async def _send_ban_alert(self, target_guild: discord.Guild, source_guild: discord.Guild, 
                             actor: discord.Member, user: discord.User, reason: str, 
                             alert_reason: str = "No reason provided"):
+        """Send a ban alert to the configured ban alert channel.
+        
+        Args:
+            target_guild: The guild where the alert should be sent
+            source_guild: The guild where the ban originated
+            actor: The member who performed the ban
+            user: The user who was banned
+            reason: The reason for the ban
+            alert_reason: The reason for the alert (why the ban couldn't be auto-synced)
+        """
         cursor = self.db.cursor()
         cursor.execute("SELECT ban_alert_channel FROM ban_sync_settings WHERE guild_id = ?", (target_guild.id,))
         result = cursor.fetchone()
