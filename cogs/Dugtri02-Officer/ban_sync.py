@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+from discord.ui import View, Button
 
 class BanSync(commands.GroupCog, name="ban_sync"):
     def __init__(self, bot: commands.Bot):
@@ -8,6 +9,32 @@ class BanSync(commands.GroupCog, name="ban_sync"):
         self.db = bot.db
         self._create_tables()
     
+    class BanButton(discord.ui.Button):
+        def __init__(self, user_id: int, guild_id: int):
+            super().__init__(style=discord.ButtonStyle.danger, label="Ban User", custom_id=f"ban_{user_id}_{guild_id}")
+            self.user_id = user_id
+            self.guild_id = guild_id
+
+        async def callback(self, interaction: discord.Interaction):
+            if not interaction.user.guild_permissions.ban_members:
+                await interaction.response.send_message("❌ You don't have permission to use this button.", ephemeral=True)
+                return
+
+            guild = interaction.guild
+            user = await interaction.client.fetch_user(self.user_id)
+            
+            try:
+                await guild.ban(user, reason=f"Banned via ban sync alert (by {interaction.user})")
+                await interaction.response.send_message(f"✅ Successfully banned {user.mention}.", ephemeral=True)
+                
+                # Update the embed to show the ban was completed
+                embed = interaction.message.embeds[0]
+                embed.color = discord.Color.green()
+                embed.set_footer(text=f"Banned by {interaction.user}")
+                await interaction.message.edit(embed=embed, view=None)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Failed to ban user: {str(e)}", ephemeral=True)
+
     def _create_tables(self):
         cursor = self.db.cursor()
         cursor.execute("""
@@ -17,6 +44,15 @@ class BanSync(commands.GroupCog, name="ban_sync"):
                 PRIMARY KEY (guild_one_id, guild_two_id)
             )
         """)
+        
+        # Create settings table if it doesn't exist
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ban_sync_settings (
+                guild_id BIGINT PRIMARY KEY,
+                ban_alert_channel BIGINT
+            )
+        """)
+            
         self.db.commit()
 
     @app_commands.command(name="add", description="Link another guild for ban synchronization.")
@@ -86,6 +122,27 @@ class BanSync(commands.GroupCog, name="ban_sync"):
         else:
             await interaction.followup.send("❌ These guilds are not linked.", ephemeral=True)
 
+    @app_commands.command(name="set_alert_channel", description="Set the channel where ban alerts will be sent.")
+    @app_commands.describe(channel="The channel to send ban alerts to")
+    @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
+    async def set_alert_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        """Set the channel where ban alerts will be sent."""
+        cursor = self.db.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO ban_sync_settings (guild_id, ban_alert_channel) VALUES (?, ?)",
+            (interaction.guild.id, channel.id)
+        )
+        self.db.commit()
+        await interaction.response.send_message(f"✅ Ban alerts will now be sent to {channel.mention}.", ephemeral=True)
+    
+    @app_commands.command(name="remove_alert_channel", description="Remove the channel where ban alerts will be sent.")
+    @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
+    async def remove_alert_channel(self, interaction: discord.Interaction):
+        cursor = self.db.cursor()
+        cursor.execute("DELETE FROM ban_sync_settings WHERE guild_id = ?", (interaction.guild.id,))
+        self.db.commit()
+        await interaction.response.send_message("✅ Ban alerts will no longer be sent.", ephemeral=True)
+
     @app_commands.command(name="list", description="List all guilds linked for ban synchronization.")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
     async def list_links(self, interaction: discord.Interaction):
@@ -150,7 +207,7 @@ class BanSync(commands.GroupCog, name="ban_sync"):
             return
 
         linked_guilds = await self._get_linked_guilds(guild.id)
-        sync_reason = f"{guild.name}: {reason}"
+        sync_reason = f"{actor.name} ({actor.id}) in {guild.name} banned for reason: {reason}"
 
         for linked_guild_id in linked_guilds:
             linked_guild = self.bot.get_guild(linked_guild_id)
@@ -162,10 +219,14 @@ class BanSync(commands.GroupCog, name="ban_sync"):
                 try:
                     actor_member = await linked_guild.fetch_member(actor.id)
                     if not actor_member.guild_permissions.ban_members:
-                        print(f"Skipping ban in {linked_guild.name}: {actor.name} lacks ban permissions")
+                        # Instead of skipping, send an alert to the ban alert channel
+                        await self._send_ban_alert(linked_guild, guild, actor, user, reason)
+                        print(f"Sent ban alert in {linked_guild.name}: {actor.name} lacks ban permissions")
                         continue
                 except discord.NotFound:
-                    print(f"Skipping ban in {linked_guild.name}: {actor.name} not in guild")
+                    # Actor is not in the linked guild, send alert
+                    await self._send_ban_alert(linked_guild, guild, actor, user, reason)
+                    print(f"Sent ban alert in {linked_guild.name}: {actor.name} not in guild")
                     continue
                 except discord.HTTPException as e:
                     print(f"Error checking permissions in {linked_guild.name}: {e}")
@@ -253,6 +314,43 @@ class BanSync(commands.GroupCog, name="ban_sync"):
                 print(f"Failed to check ban status for {user.id} in {linked_guild.name}: {e}")
 
     @commands.Cog.listener()
+    async def _send_ban_alert(self, target_guild: discord.Guild, source_guild: discord.Guild, 
+                            actor: discord.Member, user: discord.User, reason: str):
+        """Send a ban alert to the configured ban alert channel."""
+        cursor = self.db.cursor()
+        cursor.execute("SELECT ban_alert_channel FROM ban_sync_settings WHERE guild_id = ?", (target_guild.id,))
+        result = cursor.fetchone()
+        
+        if not result or not result[0]:
+            print(f"No ban alert channel configured for {target_guild.name}")
+            return
+            
+        channel = target_guild.get_channel(result[0])
+        if not channel:
+            print(f"Configured ban alert channel not found in {target_guild.name}")
+            return
+            
+        embed = discord.Embed(
+            title="⚠️ Ban Sync Alert",
+            description=(
+                f"A user was banned in **{source_guild.name}** by a non-moderator of this server.\n\n"
+                f"**User:** {user.mention} (`{user.id}`)\n"
+                f"**Banned by:** {actor.mention} (`{actor.id}`)\n"
+                f"**Reason:** {reason or 'No reason provided'}"
+            ),
+            color=discord.Color.orange()
+        )
+        embed.set_thumbnail(url=user.display_avatar.url)
+        embed.set_footer(text=f"User ID: {user.id}")
+        
+        view = View(timeout=None)
+        view.add_item(self.BanButton(user.id, target_guild.id))
+        
+        try:
+            await channel.send(embed=embed, view=view)
+        except Exception as e:
+            print(f"Failed to send ban alert in {target_guild.name}: {e}")
+
     async def on_command_error(self, interaction: discord.Interaction, error: Exception) -> None:
         if isinstance(error, app_commands.CheckFailure):
             await interaction.response.send_message(
