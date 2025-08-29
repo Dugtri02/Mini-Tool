@@ -11,6 +11,7 @@ class BanSync(commands.GroupCog, name="sink"):
         self.bot = bot
         self.db = bot.db
         self._create_tables()
+        self.pending_requests = {}  # Format: {(guild1_id, guild2_id): view}
     
     class BanButton(discord.ui.Button):
         def __init__(self, user_id: int, guild_id: int):
@@ -74,6 +75,13 @@ class BanSync(commands.GroupCog, name="sink"):
                 ban_alert_channel BIGINT
             )
         """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ban_sync_request_blacklist (
+                guild_id BIGINT PRIMARY KEY,
+                guild_ban_id BIGINT
+            )
+        """)
             
         self.db.commit()
 
@@ -89,7 +97,7 @@ class BanSync(commands.GroupCog, name="sink"):
         return None
 
     class GuildLinkRequestView(View):
-        def __init__(self, source_guild: discord.Guild, target_guild: discord.Guild, db, requester: discord.Member, original_message: discord.Message = None):
+        def __init__(self, source_guild: discord.Guild, target_guild: discord.Guild, db, requester: discord.Member, original_message: discord.Message = None, parent_cog=None):
             super().__init__(timeout=86400)  # 24 hours timeout
             self.source_guild = source_guild
             self.target_guild = target_guild
@@ -99,6 +107,23 @@ class BanSync(commands.GroupCog, name="sink"):
             self.approved = asyncio.Event()
             self.decision = None  # 'accepted' or 'rejected'
             self.decided_by = None
+            self.parent_cog = parent_cog
+            
+            # Add a blacklist button
+            blacklist_btn = Button(style=discord.ButtonStyle.grey, label="Blacklist Guild", emoji="🚫")
+            blacklist_btn.callback = self.blacklist_guild
+            self.add_item(blacklist_btn)
+            
+        async def on_timeout(self):
+            # Clean up the pending request when the view times out
+            if self.parent_cog:
+                key = self._get_request_key()
+                if key in self.parent_cog.pending_requests:
+                    del self.parent_cog.pending_requests[key]
+            
+        def _get_request_key(self):
+            # Create a consistent key for the request regardless of guild order
+            return tuple(sorted((self.source_guild.id, self.target_guild.id)))
 
         async def update_original_message(self, interaction: discord.Interaction = None):
             if not self.original_message:
@@ -174,6 +199,13 @@ class BanSync(commands.GroupCog, name="sink"):
             await self.update_original_message(interaction)
             await self.notify_requester(interaction, approved=True)
             self.approved.set()
+            
+            # Clean up the pending request
+            if self.parent_cog:
+                key = self._get_request_key()
+                if key in self.parent_cog.pending_requests:
+                    del self.parent_cog.pending_requests[key]
+            
             await interaction.followup.send("✅ Guild link request approved!", ephemeral=True)
             self.stop()
 
@@ -188,7 +220,61 @@ class BanSync(commands.GroupCog, name="sink"):
             self.decided_by = str(interaction.user)
             await self.update_original_message(interaction)
             await self.notify_requester(interaction, approved=False)
+            
+            # Clean up the pending request
+            if self.parent_cog:
+                key = self._get_request_key()
+                if key in self.parent_cog.pending_requests:
+                    del self.parent_cog.pending_requests[key]
+            
             await interaction.followup.send("❌ Guild link request rejected.", ephemeral=True)
+            self.stop()
+            
+        async def blacklist_guild(self, interaction: discord.Interaction):
+            if not interaction.user.guild_permissions.administrator and interaction.user.id != interaction.guild.owner_id:
+                await interaction.response.send_message("❌ You don't have permission to blacklist guilds.", ephemeral=True)
+                return
+                
+            await interaction.response.defer(ephemeral=True)
+            
+            # Add to blacklist
+            cursor = self.db.cursor()
+            # First check if already blacklisted
+            cursor.execute("""
+                SELECT 1 FROM ban_sync_request_blacklist 
+                WHERE guild_id = ? AND guild_ban_id = ?
+            """, (interaction.guild.id, self.source_guild.id))
+            
+            if not cursor.fetchone():
+                cursor.execute("""
+                    INSERT INTO ban_sync_request_blacklist (guild_id, guild_ban_id) 
+                    VALUES (?, ?)
+                """, (interaction.guild.id, self.source_guild.id))
+                self.db.commit()
+            
+            # Update the request message
+            embed = interaction.message.embeds[0]
+            embed.color = discord.Color.dark_grey()
+            embed.title = "🚫 Guild Blacklisted"
+            embed.description = f"**{self.source_guild.name}** (`{self.source_guild.id}`) has been added to the blacklist and cannot send ban sync requests to this server."
+            
+            # Remove all buttons
+            for item in self.children[:]:
+                self.remove_item(item)
+                
+            await interaction.message.edit(embed=embed, view=self)
+            
+            # Clean up the pending request
+            if self.parent_cog:
+                key = self._get_request_key()
+                if key in self.parent_cog.pending_requests:
+                    del self.parent_cog.pending_requests[key]
+            
+            await interaction.followup.send(
+                f"✅ **{self.source_guild.name}** (`{self.source_guild.id}`) has been added to the blacklist. "
+                "They will no longer be able to send ban sync requests to this server.", 
+                ephemeral=True
+            )
             self.stop()
 
     @app_commands.command(name="add", description="Link another guild for ban synchronization.")
@@ -221,6 +307,21 @@ class BanSync(commands.GroupCog, name="sink"):
             await interaction.followup.send("✅ These guilds are already linked.", ephemeral=True)
             return
 
+        # Check if we're blacklisted by the target guild
+        cursor = self.db.cursor()
+        cursor.execute("""
+            SELECT 1 FROM ban_sync_request_blacklist 
+            WHERE guild_id = ? AND guild_ban_id = ?
+        """, (target_guild.id, interaction.guild.id))
+        
+        if cursor.fetchone():
+            await interaction.followup.send(
+                f"❌ You cannot send a link request to `{target_guild.name}`. "
+                "This server has blacklisted your guild from sending ban sync requests.",
+                ephemeral=True
+            )
+            return
+
         # Check if user has admin in target guild
         target_member = target_guild.get_member(interaction.user.id)
         has_admin_in_target = (target_member and 
@@ -243,11 +344,22 @@ class BanSync(commands.GroupCog, name="sink"):
                 )
                 return
 
+            # Check for existing pending request
+            request_key = tuple(sorted((interaction.guild.id, target_guild.id)))
+            if request_key in self.pending_requests:
+                existing_view = self.pending_requests[request_key]
+                await interaction.followup.send(
+                    "❌ There's already a pending request between these guilds. "
+                    f"Please wait for it to be resolved or time out.",
+                    ephemeral=True
+                )
+                return
+
             # Create and send the request
             embed = discord.Embed(
                 title="🔗 Guild Link Request",
                 description=(
-                    f"**{interaction.guild.name}** wants to link with this server for ban synchronization.\n\n"
+                    f"**{interaction.guild.name}** (`{interaction.guild.id}`) wants to link with this server for ban synchronization.\n\n"
                     "⚠️ **This will allow them to sync bans to this server.**\n"
                     "Administrators of this server can accept or reject this request."
                 ),
@@ -262,8 +374,12 @@ class BanSync(commands.GroupCog, name="sink"):
                     source_guild=interaction.guild,
                     target_guild=target_guild,
                     db=self.db,
-                    requester=interaction.user
+                    requester=interaction.user,
+                    parent_cog=self
                 )
+                
+                # Store the pending request
+                self.pending_requests[request_key] = view
                 
                 # Send the message and store the message reference in the view
                 message = await alert_channel.send(embed=embed, view=view)
@@ -361,6 +477,105 @@ class BanSync(commands.GroupCog, name="sink"):
         cursor.execute("DELETE FROM ban_sync_settings WHERE guild_id = ?", (interaction.guild.id,))
         self.db.commit()
         await interaction.response.send_message("✅ Ban alerts will no longer be sent.", ephemeral=True)
+        
+    @app_commands.command(name="blacklist_add", description="Prevent a guild from sending ban sync requests to this server.")
+    @app_commands.describe(guild_id="The ID of the guild to blacklist")
+    @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
+    async def blacklist_guild(self, interaction: discord.Interaction, guild_id: str):
+        """Add a guild to the ban sync request blacklist."""
+        try:
+            guild_id_int = int(guild_id)
+        except ValueError:
+            await interaction.response.send_message("❌ Invalid guild ID format. Please provide a numeric guild ID.", ephemeral=True)
+            return
+            
+        if guild_id_int == interaction.guild.id:
+            await interaction.response.send_message("❌ You cannot blacklist your own guild.", ephemeral=True)
+            return
+            
+        cursor = self.db.cursor()
+        
+        # Check if already blacklisted
+        cursor.execute("SELECT 1 FROM ban_sync_request_blacklist WHERE guild_id = ? AND guild_ban_id = ?", 
+                      (interaction.guild.id, guild_id_int))
+        if cursor.fetchone():
+            await interaction.response.send_message(f"❌ Guild `{guild_id}` is already blacklisted.", ephemeral=True)
+            return
+            
+        # Add to blacklist
+        cursor.execute("""
+            INSERT INTO ban_sync_request_blacklist (guild_id, guild_ban_id) 
+            VALUES (?, ?)
+            ON CONFLICT(guild_id, guild_ban_id) DO NOTHING
+        """, (interaction.guild.id, guild_id_int))
+        self.db.commit()
+        
+        await interaction.response.send_message(f"✅ Guild `{guild_id}` has been blacklisted from sending ban sync requests to this server.", ephemeral=True)
+    
+    @app_commands.command(name="blacklist_remove", description="Remove a guild from the ban sync request blacklist.")
+    @app_commands.describe(guild_id="The ID of the guild to unblacklist")
+    @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
+    async def unblacklist_guild(self, interaction: discord.Interaction, guild_id: str):
+        """Remove a guild from the ban sync request blacklist."""
+        try:
+            guild_id_int = int(guild_id)
+        except ValueError:
+            await interaction.response.send_message("❌ Invalid guild ID format. Please provide a numeric guild ID.", ephemeral=True)
+            return
+            
+        cursor = self.db.cursor()
+        
+        # Check if actually blacklisted
+        cursor.execute("SELECT 1 FROM ban_sync_request_blacklist WHERE guild_id = ? AND guild_ban_id = ?", 
+                      (interaction.guild.id, guild_id_int))
+        if not cursor.fetchone():
+            await interaction.response.send_message(f"❌ Guild `{guild_id}` is not in the blacklist.", ephemeral=True)
+            return
+            
+        # Remove from blacklist
+        cursor.execute("""
+            DELETE FROM ban_sync_request_blacklist 
+            WHERE guild_id = ? AND guild_ban_id = ?
+        """, (interaction.guild.id, guild_id_int))
+        self.db.commit()
+        
+        await interaction.response.send_message(f"✅ Guild `{guild_id}` has been removed from the blacklist and can now send ban sync requests to this server.", ephemeral=True)
+    
+    @app_commands.command(name="blacklist_list", description="List all guilds blacklisted from sending ban sync requests.")
+    @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
+    async def list_blacklisted_guilds(self, interaction: discord.Interaction):
+        """List all guilds blacklisted from sending ban sync requests."""
+        cursor = self.db.cursor()
+        cursor.execute("""
+            SELECT guild_ban_id FROM ban_sync_request_blacklist 
+            WHERE guild_id = ?
+            ORDER BY guild_ban_id
+        """, (interaction.guild.id,))
+        
+        blacklisted = cursor.fetchall()
+        
+        if not blacklisted:
+            await interaction.response.send_message("No guilds are currently blacklisted from sending ban sync requests to this server.", ephemeral=True)
+            return
+            
+        # Format the list of guilds
+        guild_list = []
+        for row in blacklisted:
+            guild_id = row[0]
+            guild = self.bot.get_guild(guild_id)
+            if guild:
+                guild_list.append(f"- {guild.name} (`{guild_id}`)")
+            else:
+                guild_list.append(f"- Unknown Guild (`{guild_id}`)")
+                
+        embed = discord.Embed(
+            title=f"Guilds Blacklisted from Ban Sync Requests",
+            description="\n".join(guild_list) if guild_list else "No guilds are blacklisted.",
+            color=discord.Color.blue()
+        )
+        embed.set_footer(text=f"Total: {len(blacklisted)} guild(s)")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="list", description="List all guilds linked for ban synchronization.")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
