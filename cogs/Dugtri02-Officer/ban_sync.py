@@ -277,6 +277,18 @@ class BanSync(commands.GroupCog, name="sync"):
             )
             self.stop()
 
+    # Check if either guild has reached the maximum number of links (8)
+    async def get_link_count(self, guild_id):
+        cursor = self.db.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) as link_count FROM (
+                SELECT guild_two_id FROM ban_sync_links WHERE guild_one_id = ?
+                UNION
+                SELECT guild_one_id FROM ban_sync_links WHERE guild_two_id = ?
+            )
+        """, (guild_id, guild_id))
+        return cursor.fetchone()[0]
+
     @app_commands.command(name="link_add", description="Link another guild for ban synchronization.")
     @app_commands.describe(guild_id="The ID of the guild to link.")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
@@ -291,6 +303,26 @@ class BanSync(commands.GroupCog, name="sync"):
 
         if interaction.guild.id == target_guild_id:
             await interaction.followup.send("❌ You cannot link a guild to itself.", ephemeral=True)
+            return
+        
+        # Check source guild's link count
+        source_links = await self.get_link_count(interaction.guild.id)
+        if source_links >= 8:
+            await interaction.followup.send(
+                "❌ Your server has reached the maximum limit of 8 linked servers. "
+                "Please unlink a server before adding a new one.",
+                ephemeral=True
+            )
+            return
+            
+        # Check target guild's link count
+        target_links = await self.get_link_count(target_guild_id)
+        if target_links >= 8:
+            await interaction.followup.send(
+                "❌ The target server has already reached the maximum limit of 8 linked servers. "
+                "They need to unlink a server before you can link with them.",
+                ephemeral=True
+            )
             return
 
         target_guild = self.bot.get_guild(target_guild_id)
