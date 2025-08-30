@@ -942,15 +942,30 @@ class BanSync(commands.GroupCog, name="sync"):
         if not channel:
             return
             
+        # Create description parts
+        description_parts = [
+            f"> User banned in `{source_guild.name}`.",
+            f"> {alert_reason}\n"
+        ]
+        
+        # Add user info
+        user_mention = user.mention if hasattr(user, 'mention') else f"`{user.name if hasattr(user, 'name') else 'Unknown User'}`"
+        description_parts.append(f"**User:** {user_mention} (`{getattr(user, 'id', 'Unknown')}`)")
+        
+        # Add actor info if available
+        if actor is not None:
+            actor_mention = actor.mention if hasattr(actor, 'mention') else f"`{actor.name if hasattr(actor, 'name') else 'Unknown'}`"
+            description_parts.append(f"**Banned by:** {actor_mention} (`{getattr(actor, 'id', 'Unknown')}`)")
+        else:
+            description_parts.append("**Banned by:** [Unknown]")
+            
+        # Add reason
+        description_parts.append(f"**Reason:** {reason or 'No reason provided'}")
+        
+        # Create the embed
         embed = discord.Embed(
             title="⚠️ Ban Sync Alert",
-            description=(
-                f"> User banned in `{source_guild.name}`.\n"
-                f"> {alert_reason}\n\n"
-                f"**User:** {user.mention} (`{user.id}`)\n"
-                f"**Banned by:** {actor.mention} (`{actor.id}`)\n"
-                f"**Reason:** {reason or 'No reason provided'}"
-            ),
+            description="\n".join(description_parts),
             color=discord.Color.orange()
         )
         embed.set_thumbnail(url=user.display_avatar.url)
