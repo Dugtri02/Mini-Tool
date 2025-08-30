@@ -86,7 +86,6 @@ class BanSync(commands.GroupCog, name="sync"):
         self.db.commit()
 
     async def _get_alert_channel(self, guild_id: int) -> Optional[discord.TextChannel]:
-        """Get the alert channel for a guild if it exists."""
         cursor = self.db.cursor()
         cursor.execute("SELECT ban_alert_channel FROM ban_sync_settings WHERE guild_id = ?", (guild_id,))
         result = cursor.fetchone()
@@ -493,7 +492,6 @@ class BanSync(commands.GroupCog, name="sync"):
     @app_commands.describe(channel="The channel to send ban alerts to")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
     async def set_alert_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        """Set the channel where ban alerts will be sent."""
         cursor = self.db.cursor()
         cursor.execute(
             "INSERT OR REPLACE INTO ban_sync_settings (guild_id, ban_alert_channel) VALUES (?, ?)",
@@ -514,7 +512,6 @@ class BanSync(commands.GroupCog, name="sync"):
     @app_commands.describe(guild_id="The ID of the guild to blacklist")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
     async def blacklist_guild(self, interaction: discord.Interaction, guild_id: str):
-        """Add a guild to the ban sync request blacklist."""
         try:
             guild_id_int = int(guild_id)
         except ValueError:
@@ -548,7 +545,6 @@ class BanSync(commands.GroupCog, name="sync"):
     @app_commands.describe(guild_id="The ID of the guild to unblacklist")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
     async def unblacklist_guild(self, interaction: discord.Interaction, guild_id: str):
-        """Remove a guild from the ban sync request blacklist."""
         try:
             guild_id_int = int(guild_id)
         except ValueError:
@@ -576,7 +572,6 @@ class BanSync(commands.GroupCog, name="sync"):
     @app_commands.command(name="blacklist_list", description="List all guilds blacklisted from sending ban sync requests.")
     @app_commands.check(lambda interaction: interaction.user.guild_permissions.administrator or interaction.user.id == interaction.guild.owner_id)
     async def list_blacklisted_guilds(self, interaction: discord.Interaction):
-        """List all guilds blacklisted from sending ban sync requests."""
         cursor = self.db.cursor()
         cursor.execute("""
             SELECT guild_ban_id FROM ban_sync_request_blacklist 
@@ -658,16 +653,28 @@ class BanSync(commands.GroupCog, name="sync"):
 
     @commands.Cog.listener()
     async def on_member_ban(self, guild: discord.Guild, user: discord.User):
-        """Handle when a member is banned in any guild."""
-        # Check if the ban was performed by the bot itself
-        if user.id == self.bot.user.id:
-            return
-            
+        
         # Check if this is our own ban (to prevent ban chains)
         # Format: {guild_id: {'user_id': user_id, 'source_guild_id': source_guild_id}}
         ban_key = f"{guild.id}_{user.id}"
         if hasattr(self, '_processing_ban') and ban_key in self._processing_ban:
+            # If this ban was triggered by our own sync process, don't process it
             return
+            
+        # Check if the ban was performed by this bot
+        try:
+            # Look for ban entries in the last 10 seconds
+            async for entry in guild.audit_logs(
+                limit=5,  # Check last 5 entries to be safe
+                action=discord.AuditLogAction.ban,
+                after=discord.utils.utcnow() - datetime.timedelta(seconds=10)
+            ):
+                if entry.target.id == user.id and entry.user.id == self.bot.user.id:
+                    # This ban was performed by this bot, don't sync it
+                    return
+        except Exception as e:
+            print(f"Error checking audit log in {guild.name}: {e}")
+            # If we can't check audit logs, continue with the ban
 
         actor = None
         reason = "No reason provided"
@@ -802,10 +809,26 @@ class BanSync(commands.GroupCog, name="sync"):
 
     @commands.Cog.listener()
     async def on_member_unban(self, guild: discord.Guild, user: discord.User):
+
+        # Check if the ban was performed by this bot
+        try:
+            # Look for ban entries in the last 10 seconds
+            async for entry in guild.audit_logs(
+                limit=5,  # Check last 5 entries to be safe
+                action=discord.AuditLogAction.ban,
+                after=discord.utils.utcnow() - datetime.timedelta(seconds=10)
+            ):
+                if entry.target.id == user.id and entry.user.id == self.bot.user.id:
+                    # This ban was performed by this bot, don't sync it
+                    return
+        except Exception as e:
+            print(f"Error checking audit log in {guild.name}: {e}")
+            # If we can't check audit logs, continue with the ban
+
         actor = None
         reason = "No reason provided"
         try:
-            async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.unban):
+            async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.unban):
                 if entry.target.id == user.id:
                     actor = entry.user
                     reason = entry.reason or "No reason provided"
@@ -856,16 +879,6 @@ class BanSync(commands.GroupCog, name="sync"):
     async def _send_ban_alert(self, target_guild: discord.Guild, source_guild: discord.Guild, 
                             actor: discord.Member, user: discord.User, reason: str, 
                             alert_reason: str = "No reason provided"):
-        """Send a ban alert to the configured ban alert channel.
-        
-        Args:
-            target_guild: The guild where the alert should be sent
-            source_guild: The guild where the ban originated
-            actor: The member who performed the ban
-            user: The user who was banned
-            reason: The reason for the ban
-            alert_reason: The reason for the alert (why the ban couldn't be auto-synced)
-        """
         cursor = self.db.cursor()
         cursor.execute("SELECT ban_alert_channel FROM ban_sync_settings WHERE guild_id = ?", (target_guild.id,))
         result = cursor.fetchone()
