@@ -896,6 +896,10 @@ class BanSync(commands.GroupCog, name="sync"):
                 continue
 
             try:
+                # Check if the actor is our bot - if so, skip to prevent ban loops
+                if actor and actor.id == self.bot.user.id:
+                    continue
+
                 # Check if the actor has ban permissions in the linked guild
                 try:
                     actor_member = await linked_guild.fetch_member(actor.id)
