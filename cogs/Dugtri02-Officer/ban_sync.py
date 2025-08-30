@@ -46,13 +46,13 @@ class BanSync(commands.GroupCog, name="sync"):
                 return
             
             try:
-                await guild.ban(target_user, reason=f"Banned via ban sync alert (by {interaction.user})")
+                await guild.ban(target_user, reason=f"Banned by {interaction.user}")
                 await interaction.response.send_message(f"✅ Successfully banned {target_user.mention}.", ephemeral=True)
                 
                 # Update the embed to show the ban was completed
                 embed = interaction.message.embeds[0]
                 embed.color = discord.Color.green()
-                embed.set_footer(text=f"Banned by {interaction.user}")
+                embed.set_footer(text=f"Approved by {interaction.user}")
                 await interaction.message.edit(embed=embed, view=None)
             except discord.Forbidden:
                 await interaction.response.send_message("❌ I don't have permission to ban users in this server.", ephemeral=True)
@@ -711,12 +711,11 @@ class BanSync(commands.GroupCog, name="sync"):
                         )
                 
                 actor_name = "[Unknown User]"
-                actor_id = "[Unknown]"
                 sync_reason = f"User banned in {guild.name}. Reason: {reason}"
             else:
                 actor_name = actor.name
-                actor_id = actor.id
-                sync_reason = f"{actor_name} ({actor_id}) in {guild.name} banned for reason: {reason}"
+                # Roshi thought it was misleading before
+                sync_reason = f"{actor_name}|{guild.name}: {reason}"
                 
         except discord.Forbidden:
             print(f"Missing Audit Log permissions in {guild.name} to fetch ban reason.")
@@ -735,19 +734,17 @@ class BanSync(commands.GroupCog, name="sync"):
                     )
             
             actor_name = "[Unknown User]"
-            actor_id = "[Unknown]"
             sync_reason = f"User banned in {guild.name}. Reason: {reason}"
             
         except Exception as e:
             print(f"Error fetching audit logs in {guild.name}: {e}")
             # If we encounter any other error, still try to proceed with the ban sync
             actor_name = "[Unknown User]"
-            actor_id = "[Unknown]"
             sync_reason = f"User banned in {guild.name}. Reason: {reason}"
         else:
             actor_name = actor.name
-            actor_id = actor.id
-            sync_reason = f"{actor_name} ({actor_id}) in {guild.name} banned for reason: {reason}"
+            # Roshi thought it was misleading before
+            sync_reason = f"{actor_name}|{guild.name}: {reason}"
 
         linked_guilds = await self._get_linked_guilds(guild.id)
 
