@@ -222,7 +222,6 @@ class ImpExp(commands.GroupCog, name="bans"):
                     user = await self.bot.fetch_user(user_id)
                     await interaction.guild.ban(user, reason=f"Banned via import by {interaction.user}")
                     self.active_imports[interaction.id]['success'] += 1
-                    print(f"✅ Banned user {user} (ID: {user_id}) in guild {interaction.guild.name} (ID: {interaction.guild.id})")
                 except discord.NotFound:
                     self.active_imports[interaction.id]['failed_users'].append((user_id, "User not found"))
                     self.active_imports[interaction.id]['failed'] += 1
@@ -313,9 +312,18 @@ class ImpExp(commands.GroupCog, name="bans"):
                 ephemeral=True
             )
             return
-            
+
+        # Defer the response to avoid interaction timeout
         await interaction.response.defer(ephemeral=True)
-        await self._process_import(interaction, attachment)
+        
+        # Add the import to the queue
+        await self.import_queue.put((interaction, attachment))
+        
+        # Start processing the queue if not already processing
+        asyncio.create_task(self.process_import_queue())
+        
+        # Let the user know their import is queued
+        await interaction.followup.send("🔄 Your import has been added to the queue and will be processed shortly.", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(ImpExp(bot))

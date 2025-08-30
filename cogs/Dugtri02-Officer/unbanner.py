@@ -86,7 +86,6 @@ class BanPurger(commands.GroupCog, name="unbans"):
                     )
                 except Exception as e:
                     failed += 1
-                    print(f"Failed to unban {ban.user}: {e}")
 
             status = "completed" if not view.stop_requested else "stopped"
             await message.edit(
