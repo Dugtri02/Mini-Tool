@@ -12,6 +12,7 @@ class BanSync(commands.GroupCog, name="sync"):
         self.db = bot.db
         self._create_tables()
         self.pending_requests = {}  # Format: {(guild1_id, guild2_id): view}
+        self._processing_ban = {}  # Track bans being processed to prevent loops
     
     class BanButton(discord.ui.Button):
         def __init__(self, user_id: int, guild_id: int):
@@ -692,13 +693,54 @@ class BanSync(commands.GroupCog, name="sync"):
                     actor = entry.user
                     reason = entry.reason or "No reason provided"
                     break
+            
+            # If we couldn't determine the actor, send an alert
+            if actor is None:
+                print(f"Could not find ban entry in audit logs for {user} in {guild.name}")
+                linked_guilds = await self._get_linked_guilds(guild.id)
+                for linked_guild_id in linked_guilds:
+                    linked_guild = self.bot.get_guild(linked_guild_id)
+                    if linked_guild:
+                        await self._send_ban_alert(
+                            linked_guild,
+                            guild,
+                            None,  # No actor
+                            user,
+                            reason,
+                            "Could not determine who performed the ban (missing audit log entry)"
+                        )
+                
+                actor_name = "[Unknown User]"
+                actor_id = "[Unknown]"
+                sync_reason = f"User banned in {guild.name}. Reason: {reason}"
+            else:
+                actor_name = actor.name
+                actor_id = actor.id
+                sync_reason = f"{actor_name} ({actor_id}) in {guild.name} banned for reason: {reason}"
+                
         except discord.Forbidden:
             print(f"Missing Audit Log permissions in {guild.name} to fetch ban reason.")
+            # If we don't have permission to view audit logs, send an alert
+            linked_guilds = await self._get_linked_guilds(guild.id)
+            for linked_guild_id in linked_guilds:
+                linked_guild = self.bot.get_guild(linked_guild_id)
+                if linked_guild:
+                    await self._send_ban_alert(
+                        linked_guild,
+                        guild,
+                        None,  # No actor
+                        user,
+                        reason,
+                        "Could not determine who performed the ban (missing audit log permissions)"
+                    )
+            
+            actor_name = "[Unknown User]"
+            actor_id = "[Unknown]"
+            sync_reason = f"User banned in {guild.name}. Reason: {reason}"
+            
         except Exception as e:
             print(f"Error fetching audit logs in {guild.name}: {e}")
-
-        if actor is None:
-            print(f"Could not find ban entry in audit logs for {user} in {guild.name}")
+            # If we encounter any other error, still try to proceed with the ban sync
             actor_name = "[Unknown User]"
             actor_id = "[Unknown]"
             sync_reason = f"User banned in {guild.name}. Reason: {reason}"
@@ -715,6 +757,10 @@ class BanSync(commands.GroupCog, name="sync"):
                 continue
 
             try:
+                # Check if the actor is our bot - if so, skip to prevent ban loops
+                if actor and actor.id == self.bot.user.id:
+                    continue
+                
                 # Check if the actor has ban permissions and proper role hierarchy in the linked guild
                 try:
                     if actor is None:
@@ -825,7 +871,7 @@ class BanSync(commands.GroupCog, name="sync"):
         except Exception as e:
             print(f"Error checking audit log in {guild.name}: {e}")
             # If we can't check audit logs, skip the sync process
-            return
+            pass
 
         actor = None
         reason = "No reason provided"
