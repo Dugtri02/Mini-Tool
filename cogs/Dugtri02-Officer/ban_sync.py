@@ -674,7 +674,8 @@ class BanSync(commands.GroupCog, name="sync"):
                     return
         except Exception as e:
             print(f"Error checking audit log in {guild.name}: {e}")
-            # If we can't check audit logs, continue with the ban
+            # If we can't check audit logs, skip the sync process
+            return
 
         actor = None
         reason = "No reason provided"
@@ -823,7 +824,8 @@ class BanSync(commands.GroupCog, name="sync"):
                     return
         except Exception as e:
             print(f"Error checking audit log in {guild.name}: {e}")
-            # If we can't check audit logs, continue with the ban
+            # If we can't check audit logs, skip the sync process
+            return
 
         actor = None
         reason = "No reason provided"
