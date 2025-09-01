@@ -1,3 +1,6 @@
+# This feature is an improved version of the one found in my "Simple Forum Tags & Utilities" bot
+# https://discord.com/oauth2/authorize?client_id=1297132007964540958
+
 import discord
 from discord.ext import commands
 from discord import app_commands
