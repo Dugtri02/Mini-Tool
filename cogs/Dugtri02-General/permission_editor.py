@@ -19,7 +19,7 @@ class PermissionCache:
         self.cache[guild_id] = data
         self.cache_time[guild_id] = time.time()
 
-class Pencil(commands.GroupCog, name="pencil"):
+class Pencil(commands.GroupCog, name="perm_editor"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db = bot.db

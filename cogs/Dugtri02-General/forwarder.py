@@ -3,7 +3,7 @@
 import discord; from discord import app_commands; from discord.ext import commands
 import sqlite3; from typing import Optional, List
 
-class Envelope(commands.GroupCog, name="envelope"):
+class Envelope(commands.GroupCog, name="forwarder"):
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db

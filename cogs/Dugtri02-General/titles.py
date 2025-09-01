@@ -64,7 +64,7 @@ class UpdateQueue:
         
         self.processing = False
 
-class Card(commands.GroupCog, name="card"):
+class Card(commands.GroupCog, name="titles"):
     def __init__(self, bot):
         self.bot = bot
         self._last_nick_update = {}  # Track last nickname update times for rate limiting
