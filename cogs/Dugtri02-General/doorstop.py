@@ -3,7 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 
 class DoorstopCog(commands.GroupCog, name="doorstop"):
-    def __init__(self, bot: commands.AutoShardedBot):
+    def __init__(self, bot):
         self.bot = bot
         self.db = bot.db
         self._create_tables()

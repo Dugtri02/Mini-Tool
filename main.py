@@ -15,6 +15,7 @@ intents = discord.Intents.default()
 # intents.message_content = True # Uncomment if the cogs you use require seeing messages and their contents
 # intents.presences = True # Uncomment if the cogs you use require seeing presences
 
+# Create the bot, do NOT change to autosharded, this is built on "Sqlite" which struggles with sharding
 bot = commands.Bot(command_prefix="!", intents=intents); bot.remove_command('help') # Remove the default help command so we can make our own
 
 def setup_database():
