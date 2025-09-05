@@ -715,7 +715,7 @@ class BanSync(commands.GroupCog, name="sync"):
             else:
                 actor_name = actor.name
                 # Roshi thought it was misleading before
-                sync_reason = f"{actor_name}|{guild.name}: {reason}"
+                sync_reason = f"@{actor_name}|{guild.name}: {reason}"
                 
         except discord.Forbidden:
             print(f"Missing Audit Log permissions in {guild.name} to fetch ban reason.")
@@ -744,7 +744,7 @@ class BanSync(commands.GroupCog, name="sync"):
         else:
             actor_name = actor.name
             # Roshi thought it was misleading before
-            sync_reason = f"{actor_name}|{guild.name}: {reason}"
+            sync_reason = f"@{actor_name}|{guild.name}: {reason}"
 
         linked_guilds = await self._get_linked_guilds(guild.id)
 
