@@ -87,6 +87,15 @@ class StickyMsg(commands.GroupCog, name="stickymsg"):
             WHERE guild_id = ? AND channel_id = ?
             """, (interaction.guild.id, channel.id))
             self.db.commit()
+            
+            # Clear the channel's cache
+            if channel.id in self.last_sticky_messages:
+                del self.last_sticky_messages[channel.id]
+            if channel.id in self.pending_stickies:
+                if self.pending_stickies[channel.id].get('task'):
+                    self.pending_stickies[channel.id]['task'].cancel()
+                del self.pending_stickies[channel.id]
+                
             await interaction.followup.send("Sticky message removed successfully.")
         except Exception as e:
             await interaction.followup.send(f"Error removing sticky message: {e}")
@@ -115,8 +124,21 @@ class StickyMsg(commands.GroupCog, name="stickymsg"):
         await interaction.response.defer(ephemeral=True)
         try:
             c = self.db.cursor()
+            c.execute("SELECT channel_id FROM sticky_msg WHERE guild_id = ?", (interaction.guild.id,))
+            channels = c.fetchall()
+            
             c.execute("DELETE FROM sticky_msg WHERE guild_id = ?", (interaction.guild.id,))
             self.db.commit()
+            
+            # Clear all cached messages and pending tasks for this guild
+            for channel_id, in channels:
+                if channel_id in self.last_sticky_messages:
+                    del self.last_sticky_messages[channel_id]
+                if channel_id in self.pending_stickies:
+                    if self.pending_stickies[channel_id].get('task'):
+                        self.pending_stickies[channel_id]['task'].cancel()
+                    del self.pending_stickies[channel_id]
+            
             await interaction.followup.send("All sticky messages cleared successfully.")
         except Exception as e:
             await interaction.followup.send(f"Error clearing sticky messages: {e}")
@@ -225,6 +247,29 @@ class StickyMsg(commands.GroupCog, name="stickymsg"):
         message_content = message_content.replace('\\n', '\n')
         
         return message_content, silent
+    
+    @commands.Cog.listener()
+    async def on_guild_remove(self, guild):
+        try:
+            c = self.db.cursor()
+            c.execute("SELECT channel_id FROM sticky_msg WHERE guild_id = ?", (guild.id,))
+            channels = c.fetchall()
+            
+            # Clear database entries for this guild
+            c.execute("DELETE FROM sticky_msg WHERE guild_id = ?", (guild.id,))
+            self.db.commit()
+            
+            # Clear caches for all channels in this guild
+            for channel_id, in channels:
+                if channel_id in self.last_sticky_messages:
+                    del self.last_sticky_messages[channel_id]
+                if channel_id in self.pending_stickies:
+                    if self.pending_stickies[channel_id].get('task'):
+                        self.pending_stickies[channel_id]['task'].cancel()
+                    del self.pending_stickies[channel_id]
+                    
+        except Exception as e:
+            print(f"Error cleaning up after leaving guild {guild.id}: {e}")
     
     @commands.Cog.listener()
     async def on_message(self, message):
