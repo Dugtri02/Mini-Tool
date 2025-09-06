@@ -122,17 +122,26 @@ class StickyMsg(commands.GroupCog, name="stickymsg"):
             await interaction.followup.send(f"Error clearing sticky messages: {e}")
 
     async def process_sticky_update(self, channel_id, guild_id, channel):
-        # Wait 5 seconds initially
-        await asyncio.sleep(5)
+        # Store the task reference before any awaits
+        task = asyncio.current_task()
         
-        # Keep extending the wait if new messages come in
-        while channel_id in self.pending_stickies and time.time() < self.pending_stickies[channel_id]['expiry']:
-            remaining = self.pending_stickies[channel_id]['expiry'] - time.time()
-            if remaining > 0:
-                await asyncio.sleep(remaining)
-        
-        # If we were cancelled by a new message, exit
-        if channel_id not in self.pending_stickies:
+        try:
+            # Wait 5 seconds initially
+            await asyncio.sleep(5)
+            
+            # Keep extending the wait if new messages come in for this specific channel
+            while channel_id in self.pending_stickies and self.pending_stickies[channel_id].get('task') is task:
+                remaining = self.pending_stickies[channel_id]['expiry'] - time.time()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(0.1, remaining))  # Check more frequently but sleep in small increments
+            
+            # If we were cancelled by a new message, exit
+            if channel_id not in self.pending_stickies:
+                return
+                
+        except asyncio.CancelledError:
+            # Task was cancelled, exit cleanly
             return
             
         # Get the latest sticky message content
@@ -147,20 +156,48 @@ class StickyMsg(commands.GroupCog, name="stickymsg"):
         if channel_id in self.last_sticky_messages:
             try:
                 last_message = await channel.fetch_message(self.last_sticky_messages[channel_id])
-                await last_message.delete(reason="Sticky message update")
+                await last_message.delete()
                 message_deleted = True
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                pass  # Message already deleted or bot lacks permissions
+                pass
         
         # If we couldn't delete from cache, search last 100 messages for sticky message
         if not message_deleted:
             try:
+                found = False
+                # Get the original content from database for comparison
+                db_content = result[2]
+                # Get the formatted version (with @silent removed)
+                formatted_content, _ = await self.format_message(db_content)
+                
+                # Create a set of possible message variants to match
+                possible_contents = {
+                    db_content,  # Original content with @silent
+                    formatted_content,  # Formatted content without @silent
+                    db_content.replace('@silent', '').strip(),  # @silent removed but not formatted
+                    db_content.replace('`', '')  # No code blocks
+                }
+                
+                # If the message had @silent, also check the version with @silent at start
+                if db_content.startswith('@silent'):
+                    possible_contents.add(db_content)
+                    possible_contents.add('@silent ' + formatted_content)
+                
                 async for old_message in channel.history(limit=100):
-                    if old_message.author == channel.guild.me and old_message.content == result[2]:
-                        await old_message.delete(reason="Sticky message update")
-                        break
+                    if old_message.author == channel.guild.me:
+                        current_content = old_message.content.replace('\r\n', '\n').strip()
+                        
+                        # Check if this message matches any of our possible contents
+                        if current_content in possible_contents or \
+                           any(c.replace('\r\n', '\n').strip() == current_content for c in possible_contents):
+                            try:
+                                await old_message.delete()
+                                found = True
+                                break
+                            except Exception:
+                                continue
             except (discord.Forbidden, discord.HTTPException):
-                pass  # Bot lacks permissions to fetch history or delete messages
+                pass
         
         # # Wait 0.2 seconds before sending the new message
         # await asyncio.sleep(0.2)
@@ -175,8 +212,8 @@ class StickyMsg(commands.GroupCog, name="stickymsg"):
         )
         self.last_sticky_messages[channel_id] = new_message.id
         
-        # Clean up the pending sticky
-        if channel_id in self.pending_stickies:
+        # Clean up the pending sticky if this task is still the current one
+        if channel_id in self.pending_stickies and self.pending_stickies[channel_id].get('task') is asyncio.current_task():
             del self.pending_stickies[channel_id]
 
     async def format_message(self, message_content):
@@ -195,25 +232,31 @@ class StickyMsg(commands.GroupCog, name="stickymsg"):
             return
         
         c = self.db.cursor()
-        c.execute("SELECT * FROM sticky_msg WHERE guild_id = ? AND channel_id = ?", (message.guild.id, message.channel.id))
+        c.execute("SELECT * FROM sticky_msg WHERE guild_id = ? AND channel_id = ?", 
+                 (message.guild.id, message.channel.id))
         result = c.fetchone()
+        
         if result:
             channel_id = message.channel.id
             
             # Cancel any existing task for this channel
-            if channel_id in self.pending_stickies and self.pending_stickies[channel_id]['task']:
-                self.pending_stickies[channel_id]['task'].cancel()
+            if channel_id in self.pending_stickies and self.pending_stickies[channel_id].get('task'):
+                try:
+                    self.pending_stickies[channel_id]['task'].cancel()
+                    # Wait a moment for the task to be cancelled
+                    await asyncio.sleep(0.1)
+                except Exception:
+                    pass
             
             # Create or update the pending sticky with a new expiry time (current time + 5 seconds)
-            self.pending_stickies[channel_id] = {
-                'expiry': time.time() + 5,
-                'task': None
-            }
-            
-            # Create a new task for this sticky update
-            self.pending_stickies[channel_id]['task'] = self.bot.loop.create_task(
+            task = self.bot.loop.create_task(
                 self.process_sticky_update(channel_id, message.guild.id, message.channel)
             )
+            
+            self.pending_stickies[channel_id] = {
+                'expiry': time.time() + 5,
+                'task': task
+            }
 
 async def setup(bot):
     await bot.add_cog(StickyMsg(bot))
