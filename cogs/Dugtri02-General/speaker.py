@@ -1,7 +1,6 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from main import guild_objects
 
 class Speaker(commands.Cog):
     def __init__(self, bot):
@@ -284,4 +283,4 @@ async def extract_message_id(interaction: discord.Interaction, message_ref: str)
         return None
 
 async def setup(bot):
-    await bot.add_cog(Speaker(bot), guilds=guild_objects)
+    await bot.add_cog(Speaker(bot))
