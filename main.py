@@ -1,5 +1,5 @@
-import discord, os, asyncio, logging, sqlite3, getpass, random
-from discord.ext import commands, tasks
+import discord, os, asyncio, logging, sqlite3, getpass, datetime
+from discord.ext import commands
 from dotenv import load_dotenv
 load_dotenv(); TOKEN = os.getenv('TOKEN')
 
@@ -26,6 +26,13 @@ def setup_database():
 # Store the database connection in the bot instance
 bot.db = setup_database()
 
+# List of special Guilds to sync commands to
+special_guilds = []
+try:
+    guild_objects = [discord.Object(id=guild_id) for guild_id in special_guilds]
+except Exception as e:
+    guild_objects = []
+    
 @bot.event
 async def on_ready():
     logger.info(f'Logged in as {bot.user}')
@@ -40,34 +47,45 @@ async def on_ready():
                     await asyncio.sleep(1)
                 except Exception as e:
                     logger.error(f'Failed to load cog {filename[:-3]}: {e}')
+
+    if guild_objects:
+        for guild_object in guild_objects:
+            await bot.tree.sync(guild=guild_object)
+            print(f"Synced commands to guild {guild_object}")
     await bot.tree.sync()
 
-    # Start the status change loop
-    change_status.start()
-
-@tasks.loop(hours=1, reconnect=True)
-async def change_status():
-    server_count = len(bot.guilds)
-    
-    possible_statuses = [ # Invite link goes to the Mini-Tool support server
-        f"Watchin' {server_count} Guilds",
-        f"https://discord.gg/Dt8jxXsXwe"#,
-        #f"example status 1",
-        #f"example status 2, always add a comma after the last status quote"
-    ]
-    
-    # Choose a random status from the list
-    chosen_status = random.choice(possible_statuses)
-    
-    # Create the custom activity
-    act = discord.CustomActivity(name=chosen_status)
-    
-    # Set the presence
-    await bot.change_presence(status=discord.Status.idle, activity=act)
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+    if isinstance(error, discord.app_commands.CommandNotFound):
+        await interaction.response.send_message(
+            "❌ This command is not available. The bot might need to be restarted or the command is still syncing.",
+            ephemeral=True
+        )
+    elif isinstance(error, discord.app_commands.MissingPermissions):
+        await interaction.response.send_message(
+            "❌ You don't have permission to use this command.",
+            ephemeral=True
+        )
+    elif isinstance(error, discord.app_commands.CommandOnCooldown):
+        # Calculate the timestamp when the command will be off cooldown
+        retry_time = discord.utils.utcnow() + datetime.timedelta(seconds=error.retry_after)
+        timestamp = f'<t:{int(retry_time.timestamp())}:R>'
+        await interaction.response.send_message(
+            f"⌛ This command is on cooldown. Try again {timestamp}.",
+            ephemeral=True
+        )
+    else:
+        logger.error(f"Error in command {interaction.command.name if interaction.command else 'unknown'}: {error}", exc_info=error)
+        try:
+            await interaction.response.send_message(
+                "❌ An error occurred while executing this command. The error has been logged.",
+                ephemeral=True
+            )
+        except:
+            pass  # In case the interaction has already been responded to
 
 @bot.event
 async def on_guild_remove(guild):
-        """Clean up guild data when the bot is removed from a guild."""
         try: 
             # Clean up the guild's data
             result = await clean_guild_data(bot.db, guild.id)
@@ -81,10 +99,6 @@ async def on_guild_remove(guild):
             print(f"Error in on_guild_remove for guild {guild.id}: {e}")
 
 async def clean_guild_data(db, guild_id: int) -> dict:
-    """
-    Remove all entries for a specific guild from all database tables.
-    Returns a dictionary with the results of the cleanup operation.
-    """
     try:
         c = db.cursor()
         
@@ -168,5 +182,4 @@ if __name__ == '__main__':
         else:
             with open('.env', 'w') as f:
                 f.write(f'TOKEN = \'{TOKEN}\'\n')
-
     bot.run(TOKEN)
