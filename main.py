@@ -1,4 +1,4 @@
-import discord, os, asyncio, logging, sqlite3, getpass, datetime
+import discord, os, asyncio, logging, sqlite3, getpass, datetime, tasks, random
 from discord.ext import commands
 from dotenv import load_dotenv
 load_dotenv(); TOKEN = os.getenv('TOKEN')
@@ -33,6 +33,14 @@ try:
 except Exception as e:
     guild_objects = []
     
+# inside of each cog import this -> "from main import guild_objects" <- at the top of the file
+# then when initializing the cog setup do this below...
+#
+# "async def setup(bot):
+#      await bot.add_cog(Cogclassname(bot), guilds=guild_objects)"
+#
+# this is only necessary if you want the cog restricted to certain guilds!
+    
 @bot.event
 async def on_ready():
     logger.info(f'Logged in as {bot.user}')
@@ -48,11 +56,35 @@ async def on_ready():
                 except Exception as e:
                     logger.error(f'Failed to load cog {filename[:-3]}: {e}')
 
+    # Sync commands
     if guild_objects:
         for guild_object in guild_objects:
             await bot.tree.sync(guild=guild_object)
             print(f"Synced commands to guild {guild_object}")
     await bot.tree.sync()
+    
+    # Start the status change task
+    change_status.start()
+    
+@tasks.loop(hours=1, reconnect=True)
+async def change_status():
+    server_count = len(bot.guilds)
+    
+    possible_statuses = [ # Invite link goes to the Mini-Tool support server
+        f"Watchin' {server_count} Guilds",
+        f"https://discord.gg/Dt8jxXsXwe"#,
+        #f"example status 1",
+        #f"example status 2, always add a comma after the last status quote"
+    ]
+    
+    # Choose a random status from the list
+    chosen_status = random.choice(possible_statuses)
+    
+    # Create the custom activity
+    act = discord.CustomActivity(name=chosen_status)
+    
+    # Set the presence
+    await bot.change_presence(status=discord.Status.idle, activity=act)
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
