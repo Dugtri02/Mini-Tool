@@ -56,11 +56,15 @@ async def on_ready():
                 except Exception as e:
                     logger.error(f'Failed to load cog {filename[:-3]}: {e}')
 
-    # Sync commands
     if guild_objects:
         for guild_object in guild_objects:
-            await bot.tree.sync(guild=guild_object)
-            print(f"Synced commands to guild {guild_object}")
+            try:
+                await bot.tree.sync(guild=guild_object)
+                logger.info(f"Synced commands to guild {guild_object}")
+            except discord.errors.Forbidden:
+                logger.warning(f"Cannot sync to guild {guild_object.id} - Bot not in guild or missing permissions")
+            except Exception as e:
+                logger.error(f"Failed to sync to guild {guild_object.id}: {e}")
     await bot.tree.sync()
     
     # Start the status change task
