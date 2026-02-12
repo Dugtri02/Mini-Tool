@@ -46,9 +46,9 @@ Feel free to open issues, suggest features, or submit pull requests.
 ## 👤 Credits & Support
 
 Originally developed by 'Dugtri02' with help from AI tools.  
-now being supported with help from the [community](https://discord.gg/Dt8jxXsXwe).
+now being supported with help from the [community](https://discord.gg/exwPCtMEsD).
 
-For support, feedback, or to join the community, visit [Molecord](https://discord.gg/Dt8jxXsXwe), our community Discord server.  
+For support, feedback, or to join the community, visit [Molecord](https://discord.gg/exwPCtMEsD), our community Discord server.  
 
 ## 📦 Setup Instructions
 
